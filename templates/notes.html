@@ -163,9 +163,11 @@ async function addNote() {
   const ta = document.getElementById('new-content');
   const content = ta.value.trim();
   if (!content) { showToast('請輸入內容'); return; }
+  const params = new URLSearchParams(window.location.search);
+  const uid = params.get('user_id') || null;
   const res = await fetch('/api/notes', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({content})
+    body: JSON.stringify({content, user_id: uid})
   });
   if (res.ok) { ta.value = ''; showToast('✅ 已記下來了！'); loadNotes(); }
 }

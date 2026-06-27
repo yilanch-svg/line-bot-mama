@@ -562,10 +562,11 @@ def api_notes_add():
     from modules.notes import get_client
     data = request.get_json()
     content = (data or {}).get("content", "").strip()
+    user_id = (data or {}).get("user_id") or None
     if not content:
         return jsonify({"error": "empty"}), 400
     sb = get_client()
-    result = sb.table("notes").insert({"content": content}).execute()
+    result = sb.table("notes").insert({"content": content, "user_id": user_id}).execute()
     return jsonify(result.data[0]), 201
 
 
