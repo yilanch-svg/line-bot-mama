@@ -59,20 +59,17 @@ def search_notes(keyword: str = None, year: int = None, month: int = None,
         if keyword:
             notes = [n for n in notes if keyword in n["content"]]
 
-        if not notes:
-            if keyword:
-                return f"找不到含有「{keyword}」的筆記。"
-            elif year and month:
-                return f"找不到 {year} 年 {month} 月的筆記。"
-            else:
-                return "目前還沒有任何筆記。\n\n您可以說「記一下 XXX」來新增筆記。"
-
         uid = user_id or ""
-        count = len(notes)
         url = f"https://line-bot-mama.onrender.com/notes?user_id={uid}"
+        if not notes:
+            return (
+                f"目前還沒有筆記。\n\n"
+                f"您可以說「記一下 XXX」來新增筆記，\n"
+                f"或點連結查看筆記本：\n{url}"
+            )
+
         return (
-            f"📒 您共有 {count} 筆筆記\n\n"
-            f"📱 點連結查看：\n{url}\n\n"
+            f"📒 請點連結查看筆記：\n{url}\n\n"
             f"⚠️ 此連結只限本人使用，請勿傳給他人"
         )
     except Exception:
