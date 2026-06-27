@@ -291,56 +291,77 @@ def parse_reminder(user_message: str) -> dict:
 
     trigger_time = None
 
-    # 時間 pattern（點/時 結尾，或 HH:MM 格式）
-    TIME_PAT = r"(\d{1,2})(?::(\d{2}))?(?:點|時)|(\d{1,2}):(\d{2})"
-
-    def parse_time(msg, h, m):
-        hour = int(h); minute = int(m) if m else 0
+    def _parse_hm(msg, h_str, m_str):
+        hour = int(h_str)
+        minute = int(m_str) if m_str else 0
         return _adjust_hour(msg, hour), minute
 
-    # MM/DD 或 M/D + 時間
+    # MM/DD + 時間（支援 HH:MM 或 N點）
     if not trigger_time:
-        m = re.search(r"(\d{1,2})/(\d{1,2})\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*" + TIME_PAT, user_message)
+        m = re.search(
+            r"(\d{1,2})/(\d{1,2})\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})[：:](\d{2})",
+            user_message)
         if m:
             month, day = int(m.group(1)), int(m.group(2))
-            h = m.group(3) or m.group(5)
-            mi = m.group(4) or m.group(6)
-            hour, minute = parse_time(user_message, h, mi)
+            hour, minute = _parse_hm(user_message, m.group(3), m.group(4))
             t = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            if t < now:
-                t = t.replace(year=now.year + 1)
-            trigger_time = t
+            trigger_time = t if t >= now else t.replace(year=now.year + 1)
+
+    if not trigger_time:
+        m = re.search(
+            r"(\d{1,2})/(\d{1,2})\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:](\d{2}))?(?:點|時)",
+            user_message)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+            hour, minute = _parse_hm(user_message, m.group(3), m.group(4))
+            t = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            trigger_time = t if t >= now else t.replace(year=now.year + 1)
 
     # 明天/後天 + 時間
     if not trigger_time:
-        m = re.search(r"(明天|後天|大後天)\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*" + TIME_PAT, user_message)
+        m = re.search(r"(明天|後天|大後天)\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})[：:](\d{2})", user_message)
         if m:
             day_offset = {"明天": 1, "後天": 2, "大後天": 3}[m.group(1)]
-            h = m.group(2) or m.group(4)
-            mi = m.group(3) or m.group(5)
-            hour, minute = parse_time(user_message, h, mi)
+            hour, minute = _parse_hm(user_message, m.group(2), m.group(3))
+            trigger_time = (now + timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    if not trigger_time:
+        m = re.search(r"(明天|後天|大後天)\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:](\d{2}))?(?:點|時)", user_message)
+        if m:
+            day_offset = {"明天": 1, "後天": 2, "大後天": 3}[m.group(1)]
+            hour, minute = _parse_hm(user_message, m.group(2), m.group(3))
             trigger_time = (now + timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=0, microsecond=0)
 
     # 今天 + 時間
     if not trigger_time:
-        m = re.search(r"今天\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*" + TIME_PAT, user_message)
+        m = re.search(r"今天\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})[：:](\d{2})", user_message)
         if m:
-            h = m.group(1) or m.group(3)
-            mi = m.group(2) or m.group(4)
-            hour, minute = parse_time(user_message, h, mi)
+            hour, minute = _parse_hm(user_message, m.group(1), m.group(2))
             trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-    # 時間（無日期，支援點/時 或 HH:MM）
     if not trigger_time:
-        m = re.search(r"(?:早上|上午|中午|下午|晚上|凌晨)?\s*" + TIME_PAT, user_message)
+        m = re.search(r"今天\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:](\d{2}))?(?:點|時)", user_message)
         if m:
-            h = m.group(1) or m.group(3)
-            mi = m.group(2) or m.group(4)
-            if h:
-                hour, minute = parse_time(user_message, h, mi)
-                trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                if repeat is None and trigger_time <= now:
-                    trigger_time += timedelta(days=1)
+            hour, minute = _parse_hm(user_message, m.group(1), m.group(2))
+            trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    # 時間（無日期）- HH:MM 格式
+    if not trigger_time:
+        m = re.search(r"(?:早上|上午|中午|下午|晚上|凌晨)\s*(\d{1,2})[：:](\d{2})", user_message)
+        if m:
+            hour, minute = _parse_hm(user_message, m.group(1), m.group(2))
+            trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if repeat is None and trigger_time <= now:
+                trigger_time += timedelta(days=1)
+
+    # 時間（無日期）- N點/N時 格式
+    if not trigger_time:
+        m = re.search(r"(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:](\d{2}))?(?:點|時)", user_message)
+        if m:
+            hour, minute = _parse_hm(user_message, m.group(1), m.group(2))
+            trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if repeat is None and trigger_time <= now:
+                trigger_time += timedelta(days=1)
 
     # X分鐘後
     if not trigger_time:
