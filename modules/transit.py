@@ -212,12 +212,8 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
     def raw_seconds(route) -> int:
         return sum(s["duration"]["value"] for s in route["legs"][0]["steps"])
 
-    # 直達路線（只有一段大眾運輸）優先，依實際時間排序，不套班距懲罰
-    direct = sorted([r for r in all_routes if transit_count(r) == 1], key=raw_seconds)
-    others = sorted([r for r in all_routes if transit_count(r) != 1], key=route_score)
-
-    # 直達排前面，再補換乘路線，取 top 3
-    all_routes = (direct + others)[:3]
+    # 全部用 route_score 排序（含步行懲罰 + 班距懲罰），不再強制直達優先
+    all_routes = sorted(all_routes, key=route_score)[:3]
 
     import re as _re
 
