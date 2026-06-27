@@ -188,23 +188,31 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
         return min(worst_headway * 30, 599)  # 最多加 599 秒，不超過 10 分鐘
 
     def walk_penalty(route) -> int:
-        """長距離步行懲罰秒數"""
+        """長距離步行懲罰秒數（超過8分鐘開始懲罰）"""
         steps = route["legs"][0]["steps"]
         penalty = 0
         if steps and steps[0].get("travel_mode") == "WALKING":
             first_walk_mins = steps[0]["duration"]["value"] // 60
-            if first_walk_mins > 10:
-                penalty += (first_walk_mins - 10) * 120
+            if first_walk_mins > 8:
+                penalty += (first_walk_mins - 8) * 120
         if steps and steps[-1].get("travel_mode") == "WALKING":
             last_walk_mins = steps[-1]["duration"]["value"] // 60
-            if last_walk_mins > 10:
-                penalty += (last_walk_mins - 10) * 120
+            if last_walk_mins > 8:
+                penalty += (last_walk_mins - 8) * 120
         return penalty
 
+    def mrt_bonus(route) -> int:
+        """有捷運的路線給予加分（負值，降低 score）"""
+        steps = route["legs"][0]["steps"]
+        for s in steps:
+            if s.get("travel_mode") == "TRANSIT":
+                vehicle = s["transit_details"]["line"].get("vehicle", {}).get("name", "")
+                if vehicle in ("捷運", "地鐵", "Subway", "Metro", "Rail", "Heavy Rail"):
+                    return -300  # 有捷運減 300 秒（5分鐘）
+        return 0
+
     def route_score(route) -> int:
-        # 實際時間 + 步行懲罰（長距離步行）+ 班距懲罰（上限599秒，不超過10分鐘）
-        # 確保時間差 > 10 分鐘時，照時間排；≤ 10 分鐘時班距才能影響結果
-        return raw_seconds(route) + walk_penalty(route) + headway_penalty(route)
+        return raw_seconds(route) + walk_penalty(route) + headway_penalty(route) + mrt_bonus(route)
 
     def transit_count(route) -> int:
         return sum(1 for s in route["legs"][0]["steps"] if s.get("travel_mode") == "TRANSIT")
