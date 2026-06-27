@@ -150,20 +150,7 @@ https://pda5284.gov.taipei/MQS/routelist.jsp""",
 ・「家裡到台北車站」
 ・「從捷運南京復興站到忠孝敦化站」""",
 
-    "查筆記說明": """📒 記事本
-
-【新增】記一下／記下來／幫我記／備忘
-・「記一下 明天買牛奶」
-
-【查詢】查筆記
-・「查筆記」（顯示筆記數量和網頁連結）
-・「查筆記 牛奶」（關鍵字搜尋）
-・「查這週筆記」／「查上週筆記」
-・「查筆記 202606」（指定年月）
-
-【刪除】說「刪掉最後一筆」或「刪除筆記x」（x為筆記編號）
-・「刪掉最後一筆」
-・「刪除筆記3」""",
+    # 查筆記說明 改為動態產生（含 user_id 連結），見 handle_message
 
     "查提醒說明": """⏰ 我的提醒
 
@@ -432,6 +419,16 @@ def handle_message(user_id: str, user_text: str) -> str:
     """根據意圖分派到對應模組，回傳回覆文字"""
 
     # Rich Menu 說明
+    if user_text == "查筆記說明":
+        url = f"https://line-bot-mama.onrender.com/notes?user_id={user_id}"
+        return (
+            "📒 記事本\n\n"
+            "【新增】記一下／記下來／幫我記／備忘\n"
+            "・「記一下 明天買牛奶」\n\n"
+            "查詢、編輯、刪除筆記請點連結：\n"
+            f"{url}\n\n"
+            "⚠️ 此連結只限本人使用，請勿傳給他人"
+        )
     if user_text in RICH_MENU_HELP:
         return RICH_MENU_HELP[user_text]
 
