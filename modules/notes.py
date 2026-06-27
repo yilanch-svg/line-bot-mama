@@ -67,21 +67,14 @@ def search_notes(keyword: str = None, year: int = None, month: int = None,
             else:
                 return "目前還沒有任何筆記。\n\n您可以說「記一下 XXX」來新增筆記。"
 
-        lines = ["📒 筆記清單\n"]
-        for n in notes[:20]:
-            from datetime import datetime, timezone, timedelta
-            dt = datetime.fromisoformat(n["created_at"].replace("Z", "+00:00"))
-            tw = dt.astimezone(timezone(timedelta(hours=8)))
-            date_str = tw.strftime("%m/%d %H:%M")
-            lines.append(f"[{n['id']}] {date_str}\n{n['content']}\n")
-
-        if len(result.data) > 20:
-            lines.append(f"（共 {len(result.data)} 筆，僅顯示最新 20 筆）")
-
         uid = user_id or ""
-        lines.append(f"\n📱 網頁版筆記本：\nhttps://line-bot-mama.onrender.com/notes?user_id={uid}")
-        lines.append("⚠️ 此連結只限本人使用，請勿傳給他人")
-        return "\n".join(lines)
+        count = len(notes)
+        url = f"https://line-bot-mama.onrender.com/notes?user_id={uid}"
+        return (
+            f"📒 您共有 {count} 筆筆記\n\n"
+            f"📱 點連結查看：\n{url}\n\n"
+            f"⚠️ 此連結只限本人使用，請勿傳給他人"
+        )
     except Exception:
         return "抱歉，查詢筆記失敗了，請再試一次。"
 
