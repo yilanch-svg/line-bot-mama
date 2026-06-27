@@ -296,26 +296,23 @@ def parse_reminder(user_message: str) -> dict:
         minute = int(m_str) if m_str else 0
         return _adjust_hour(msg, hour), minute
 
-    # MM/DD + 時間（支援 HH:MM 或 N點）
+    # MM/DD + 時間（先抓日期，再抓時間）
     if not trigger_time:
-        m = re.search(
-            r"(\d{1,2})/(\d{1,2})\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})[：:](\d{2})",
-            user_message)
-        if m:
-            month, day = int(m.group(1)), int(m.group(2))
-            hour, minute = _parse_hm(user_message, m.group(3), m.group(4))
-            t = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            trigger_time = t if t >= now else t.replace(year=now.year + 1)
-
-    if not trigger_time:
-        m = re.search(
-            r"(\d{1,2})/(\d{1,2})\s*(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:](\d{2}))?(?:點|時)",
-            user_message)
-        if m:
-            month, day = int(m.group(1)), int(m.group(2))
-            hour, minute = _parse_hm(user_message, m.group(3), m.group(4))
-            t = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            trigger_time = t if t >= now else t.replace(year=now.year + 1)
+        md = re.search(r"(\d{1,2})/(\d{1,2})", user_message)
+        if md:
+            try:
+                month, day = int(md.group(1)), int(md.group(2))
+                # 找日期後面的時間
+                after = user_message[md.end():]
+                tm = re.search(r"(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})[：:：](\d{2})", after)
+                if not tm:
+                    tm = re.search(r"(?:早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})(?:[：:：](\d{2}))?(?:點|時)", after)
+                if tm and tm.group(1):
+                    hour, minute = _parse_hm(user_message, tm.group(1), tm.group(2))
+                    t = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+                    trigger_time = t if t >= now else t.replace(year=now.year + 1)
+            except Exception:
+                pass
 
     # 明天/後天 + 時間
     if not trigger_time:
