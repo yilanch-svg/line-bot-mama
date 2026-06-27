@@ -78,7 +78,9 @@ def search_notes(keyword: str = None, year: int = None, month: int = None,
         if len(result.data) > 20:
             lines.append(f"（共 {len(result.data)} 筆，僅顯示最新 20 筆）")
 
-        lines.append("\n📱 網頁版筆記本：\nhttps://line-bot-mama.onrender.com/notes")
+        uid = user_id or ""
+        lines.append(f"\n📱 網頁版筆記本：\nhttps://line-bot-mama.onrender.com/notes?user_id={uid}")
+        lines.append("⚠️ 此連結只限本人使用，請勿傳給他人")
         return "\n".join(lines)
     except Exception:
         return "抱歉，查詢筆記失敗了，請再試一次。"

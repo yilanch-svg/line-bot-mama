@@ -79,7 +79,10 @@ const USER_COLORS = {
 let allNotes = [];
 
 async function loadNotes() {
-  const res = await fetch('/api/notes');
+  const params = new URLSearchParams(window.location.search);
+  const uid = params.get('user_id');
+  const url = uid ? `/api/notes?user_id=${encodeURIComponent(uid)}` : '/api/notes';
+  const res = await fetch(url);
   allNotes = await res.json();
   buildYearOptions();
   renderNotes();
