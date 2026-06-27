@@ -123,10 +123,25 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
                 max_headways = [f.get("MaxHeadwayMins") for f in freqs if f.get("MaxHeadwayMins")]
                 if max_headways:
                     return int(sum(max_headways) / len(max_headways))
-            # 固定時刻表：給一個合理的預設值
+            # 固定時刻表：從班次時間推算平均班距
             timetables = data[0].get("Timetables", [])
             if timetables:
-                return 15
+                times = []
+                for tt in timetables:
+                    for stop in tt.get("StopTimes", []):
+                        t = stop.get("DepartureTime", "")
+                        if t:
+                            try:
+                                h, m = t.split(":")[:2]
+                                times.append(int(h) * 60 + int(m))
+                            except Exception:
+                                pass
+                times = sorted(set(times))
+                if len(times) >= 2:
+                    gaps = [times[i+1] - times[i] for i in range(len(times)-1) if times[i+1] - times[i] < 120]
+                    if gaps:
+                        return int(sum(gaps) / len(gaps))
+                return 30  # 無法計算時給 30 分鐘
             return 99
         except Exception:
             return 99
