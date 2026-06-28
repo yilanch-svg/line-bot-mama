@@ -110,7 +110,6 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
     try:
         # 查詢該路線在指定站的即時到站資料
         path = f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}"
-        # 用 contains 模糊比對站名，因為 TDX 站名可能帶括號如「吳興國小(松仁)」
         stop_keyword = stop_name.replace("站", "")
         params = {
             "$filter": f"contains(StopName/Zh_tw,'{stop_keyword}')",
@@ -121,6 +120,10 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
         import logging
         logging.getLogger(__name__).error(f"TDX API error: {e}")
         return "公車資料暫時無法取得，請稍後再試。"
+
+    # 只保留站名以關鍵字開頭的資料（排除如「信義松仁路口(松仁)」這類不同站）
+    data = [item for item in data
+            if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
 
     if not data:
         return (
@@ -261,6 +264,30 @@ def tdx_nearest_stop_name(route_name: str, lat: float, lng: float,
                 best_dist = dist
                 best_name = stop.get("StopName", {}).get("Zh_tw", "")
     return best_name or None
+
+
+def get_stop_options(route_name: str, stop_name: str, city: str) -> list[str]:
+    """
+    查詢該路線在指定站名有哪些子站（以站名開頭比對）。
+    回傳唯一站名清單；只有 1 個表示不需要澄清。
+    """
+    city_code = CITY_CODE.get(city)
+    if not city_code:
+        return []
+    stop_keyword = stop_name.replace("站", "")
+    try:
+        data = tdx_get(
+            f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}",
+            {"$filter": f"contains(StopName/Zh_tw,'{stop_keyword}')", "$format": "JSON"},
+        )
+    except Exception:
+        return []
+    names = sorted({
+        item["StopName"]["Zh_tw"]
+        for item in data
+        if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)
+    })
+    return names
 
 
 def parse_bus_query(user_message: str) -> dict:
