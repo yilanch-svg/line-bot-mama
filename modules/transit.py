@@ -34,6 +34,33 @@ VAGUE_TYPE_LABELS = {
 }
 
 
+def search_places(query: str, max_results: int = 3) -> list[dict]:
+    """
+    用 Google Places Text Search 搜尋候選地點。
+    回傳 [{"name": ..., "address": ..., "lat": ..., "lng": ...}, ...]
+    """
+    import os, requests as _req
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    try:
+        r = _req.get(
+            "https://maps.googleapis.com/maps/api/place/textsearch/json",
+            params={"query": f"{query} 台灣", "language": "zh-TW", "region": "tw", "key": api_key},
+            timeout=10,
+        )
+        results = r.json().get("results", [])
+        places = []
+        for res in results[:max_results]:
+            places.append({
+                "name": res.get("name", ""),
+                "address": res.get("formatted_address", "").replace("台灣", "").replace("Taiwan", "").strip().strip(",").strip(),
+                "lat": res["geometry"]["location"]["lat"],
+                "lng": res["geometry"]["location"]["lng"],
+            })
+        return places
+    except Exception:
+        return []
+
+
 def check_location_precision(place: str) -> dict:
     """
     用 Geocoding API 確認地點是否足夠精確。

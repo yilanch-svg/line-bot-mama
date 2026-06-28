@@ -27,7 +27,7 @@ from modules.intent import detect_intent
 from modules.weather import get_weather_forecast
 from modules.qa import get_qa_response
 from modules.bus import get_bus_arrival, parse_bus_query
-from modules.transit import get_directions, parse_transit_query, check_location_precision
+from modules.transit import get_directions, parse_transit_query, check_location_precision, search_places, LOCATION_ALIAS
 from modules.notes import add_note, search_notes, delete_note, delete_last_note, parse_note_query
 from modules.reminder import add_reminder, list_reminders, cancel_reminder, cancel_multi_reminders, cancel_all_reminders, parse_reminder, scheduler, load_reminders_from_db
 
@@ -608,40 +608,140 @@ def handle_message(user_id: str, user_text: str) -> str:
 
     elif intent == "transit":
         state = transit_query_state.get(user_id, {})
-        parsed = parse_transit_query(user_text)
-        origin = parsed.get("origin") or state.get("origin")
-        # 若上一輪是要求使用者補充目的地，這輪直接把訊息當新目的地
-        if state.get("dest_confirmed"):
-            destination = parsed.get("destination") or user_text.strip()
-        else:
-            destination = parsed.get("destination") or state.get("destination")
 
-        arrival_time = parsed.get("arrival_time") or state.get("arrival_time")
-        query_type = parsed.get("query_type", "route")
+        # ── 使用者正在從候選清單選地點 ──────────────────────────
+        if state.get("place_options"):
+            options = state["place_options"]
+            clarifying = state.get("clarifying")  # "origin" or "destination"
+            cancel_num = len(options) + 1
+            choice = user_text.strip()
 
-        if not origin and not arrival_time:
-            transit_query_state[user_id] = {}
-            reply = "請問您要從哪裡出發呢？\n例如：台北車站、板橋、家裡附近的捷運站"
-        elif not destination:
-            transit_query_state[user_id] = {"origin": origin, "arrival_time": arrival_time}
-            reply = f"從「{origin}」出發，請問要去哪裡呢？"
-        else:
-            # 目的地精確度檢查：不夠精確時先問清楚，不直接查路線
-            dest_info = check_location_precision(destination)
-            if not dest_info["precise"] and not state.get("dest_confirmed"):
-                transit_query_state[user_id] = {
-                    "origin": origin, "arrival_time": arrival_time,
-                    "destination": destination, "dest_confirmed": True,
-                }
-                reply = (f"找不到「{destination}」的精確位置，"
-                         f"Google 只識別到「{dest_info['resolved']}」（{dest_info['vague_label']}）。\n\n"
-                         f"請提供更詳細的地址，例如路名＋門牌號：")
-            else:
+            if choice == str(cancel_num) or "皆非" in choice or "取消" in choice:
                 transit_query_state.pop(user_id, None)
-                reply = get_directions(origin or "家裡", destination,
-                                       orig_destination=destination,
-                                       arrival_time_str=arrival_time,
-                                       query_type=query_type)
+                reply = "好的，已取消路線查詢。"
+            else:
+                try:
+                    idx = int(choice) - 1
+                    if not (0 <= idx < len(options)):
+                        raise ValueError
+                    selected = options[idx]
+                    confirmed_addr = selected["address"]
+                    confirmed_name = selected["name"]
+
+                    if clarifying == "origin":
+                        # 起點確認，繼續檢查終點
+                        destination = state.get("destination")
+                        dest_info = check_location_precision(destination) if destination else {"precise": True}
+                        if destination and not dest_info["precise"]:
+                            places = search_places(destination)
+                            if places:
+                                lines = [f"出發地：{confirmed_name}\n\n找不到「{destination}」的精確位置，您是指：\n"]
+                                for i, p in enumerate(places, 1):
+                                    lines.append(f"{i}. {p['name']}（{p['address']}）")
+                                lines.append(f"{len(places)+1}. 以上皆非（取消查詢）")
+                                transit_query_state[user_id] = {
+                                    "origin": confirmed_addr,
+                                    "origin_name": confirmed_name,
+                                    "destination": destination,
+                                    "arrival_time": state.get("arrival_time"),
+                                    "query_type": state.get("query_type", "route"),
+                                    "place_options": places,
+                                    "clarifying": "destination",
+                                }
+                                reply = "\n".join(lines)
+                            else:
+                                transit_query_state.pop(user_id, None)
+                                reply = get_directions(
+                                    confirmed_addr, destination,
+                                    orig_destination=destination,
+                                    arrival_time_str=state.get("arrival_time"),
+                                    query_type=state.get("query_type", "route"),
+                                )
+                        else:
+                            transit_query_state.pop(user_id, None)
+                            reply = get_directions(
+                                confirmed_addr, destination or "家裡",
+                                orig_destination=destination,
+                                arrival_time_str=state.get("arrival_time"),
+                                query_type=state.get("query_type", "route"),
+                            )
+
+                    else:  # clarifying == "destination"
+                        transit_query_state.pop(user_id, None)
+                        reply = get_directions(
+                            state.get("origin") or "家裡",
+                            confirmed_addr,
+                            orig_destination=confirmed_name,
+                            arrival_time_str=state.get("arrival_time"),
+                            query_type=state.get("query_type", "route"),
+                        )
+
+                except (ValueError, IndexError):
+                    reply = f"請輸入 1 到 {cancel_num} 的數字來選擇。"
+
+        # ── 新的查詢 ─────────────────────────────────────────────
+        else:
+            parsed = parse_transit_query(user_text)
+            origin = parsed.get("origin") or state.get("origin")
+            destination = parsed.get("destination") or state.get("destination")
+            arrival_time = parsed.get("arrival_time") or state.get("arrival_time")
+            query_type = parsed.get("query_type", "route")
+
+            def needs_clarify(place_name: str) -> tuple[bool, list]:
+                """
+                回傳 (需要澄清, 候選清單)。
+                條件：Geocoding 不精確（neighborhood/sublocality 層級）。
+                LOCATION_ALIAS 裡的已知別名直接放行。
+                """
+                if place_name in LOCATION_ALIAS:
+                    return False, []
+                geo = check_location_precision(place_name)
+                if not geo["precise"]:
+                    places = search_places(place_name)
+                    return True, places
+                return False, []
+
+            def make_options_msg(place_name: str, places: list, label: str) -> str:
+                lines = [f"「{place_name}」有多個{label}，請問您是指：\n"]
+                for i, p in enumerate(places, 1):
+                    lines.append(f"{i}. {p['name']}（{p['address']}）")
+                lines.append(f"{len(places)+1}. 以上皆非（取消查詢）")
+                return "\n".join(lines)
+
+            if not origin and not arrival_time:
+                transit_query_state[user_id] = {}
+                reply = "請問您要從哪裡出發呢？\n例如：台北車站、板橋、家裡附近的捷運站"
+
+            elif not destination:
+                transit_query_state[user_id] = {"origin": origin, "arrival_time": arrival_time}
+                reply = f"從「{origin}」出發，請問要去哪裡呢？"
+
+            else:
+                # 先檢查起點
+                orig_ambig, orig_places = needs_clarify(origin) if origin else (False, [])
+                if orig_ambig and orig_places:
+                    transit_query_state[user_id] = {
+                        "origin": origin, "destination": destination,
+                        "arrival_time": arrival_time, "query_type": query_type,
+                        "place_options": orig_places, "clarifying": "origin",
+                    }
+                    reply = make_options_msg(origin, orig_places, "出發地")
+                else:
+                    # 再檢查終點
+                    dest_ambig, dest_places = needs_clarify(destination)
+                    if dest_ambig and dest_places:
+                        transit_query_state[user_id] = {
+                            "origin": origin, "destination": destination,
+                            "arrival_time": arrival_time, "query_type": query_type,
+                            "place_options": dest_places, "clarifying": "destination",
+                        }
+                        reply = make_options_msg(destination, dest_places, "目的地")
+                    else:
+                        transit_query_state.pop(user_id, None)
+                        reply = get_directions(origin or "家裡", destination,
+                                               orig_destination=destination,
+                                               arrival_time_str=arrival_time,
+                                               query_type=query_type)
 
     elif intent == "note":
         parsed = parse_note_query(user_text)
