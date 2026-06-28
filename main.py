@@ -84,6 +84,7 @@ def _rss_get(user_id: str) -> dict | None:
 
 def _rss_set(user_id: str, state: dict):
     try:
+        from datetime import datetime, timezone
         serialized = {}
         for k, v in state.items():
             if hasattr(v, "isoformat"):
@@ -91,8 +92,10 @@ def _rss_set(user_id: str, state: dict):
             else:
                 serialized[k] = v
         _get_sb().table("reminder_setup_state").upsert(
-            {"user_id": user_id, "state": serialized, "updated_at": "now()"}
+            {"user_id": user_id, "state": serialized,
+             "updated_at": datetime.now(timezone.utc).isoformat()}
         ).execute()
+        logger.info(f"rss_set ok: user={user_id} step={state.get('step')}")
     except Exception as e:
         logger.error(f"rss_set failed: {e}")
 
@@ -107,8 +110,11 @@ def _rss_del(user_id: str):
 def _rss_has(user_id: str) -> bool:
     try:
         row = _get_sb().table("reminder_setup_state").select("user_id").eq("user_id", user_id).execute().data
-        return bool(row)
-    except Exception:
+        result = bool(row)
+        logger.info(f"rss_has: user={user_id} found={result}")
+        return result
+    except Exception as e:
+        logger.error(f"rss_has failed: {e}")
         return False
 
 MAX_HISTORY_TURNS = 10
