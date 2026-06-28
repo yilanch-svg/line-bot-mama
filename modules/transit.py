@@ -37,17 +37,35 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
     origin = LOCATION_ALIAS.get(origin, origin)
     destination = LOCATION_ALIAS.get(destination, destination)
 
-    # 先用 Geocoding API 確認地點存在（加上「台灣」避免找到國外地點）
-    def geocode(place: str) -> str:
+    # Geocoding API：確認地點並取得精確度類型
+    PRECISE_TYPES = {"street_address", "premise", "subpremise",
+                     "establishment", "point_of_interest", "route"}
+    VAGUE_TYPE_LABELS = {
+        "neighborhood": "社區/里",
+        "sublocality": "行政區",
+        "sublocality_level_1": "行政區",
+        "locality": "城市",
+        "administrative_area_level_3": "鄉鎮市區",
+        "administrative_area_level_2": "縣市",
+    }
+
+    def geocode(place: str) -> tuple[str, list, bool]:
+        """回傳 (formatted_address, types, is_precise)"""
         r = requests.get(
             "https://maps.googleapis.com/maps/api/geocode/json",
             params={"address": f"{place} 台灣", "language": "zh-TW", "key": api_key},
             timeout=10,
         )
         results = r.json().get("results", [])
-        if results:
-            return results[0]["formatted_address"]
-        return place
+        if not results:
+            return place, [], False
+        res = results[0]
+        types = res.get("types", [])
+        is_precise = bool(PRECISE_TYPES & set(types))
+        return res["formatted_address"], types, is_precise
+
+    dest_geocoded, dest_types, dest_is_precise = geocode(destination)
+    orig_geocoded, _, _ = geocode(origin)
 
     # 將到達時間字串轉為 Unix timestamp
     arrival_ts = None
@@ -303,10 +321,26 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
                 line = transit.get("line", {})
                 vehicle = line.get("vehicle", {}).get("name", "")
                 line_name = line.get("short_name") or line.get("name", "")
-                dep_stop = transit.get("departure_stop", {}).get("name", "")
-                arr_stop = transit.get("arrival_stop", {}).get("name", "")
+                dep_stop_raw = transit.get("departure_stop", {})
+                arr_stop_raw = transit.get("arrival_stop", {})
+                dep_stop = dep_stop_raw.get("name", "")
+                arr_stop = arr_stop_raw.get("name", "")
                 num_stops = transit.get("num_stops", 0)
                 headsign = transit.get("headsign", "")
+
+                # 公車站名以 TDX 為準（Google Maps 站名有時不準）
+                if vehicle in ("公車", "Bus") and line_name:
+                    from modules.bus import tdx_nearest_stop_name
+                    dep_loc = dep_stop_raw.get("location", {})
+                    arr_loc = arr_stop_raw.get("location", {})
+                    if dep_loc.get("lat") and dep_loc.get("lng"):
+                        tdx_dep = tdx_nearest_stop_name(line_name, dep_loc["lat"], dep_loc["lng"])
+                        if tdx_dep:
+                            dep_stop = tdx_dep
+                    if arr_loc.get("lat") and arr_loc.get("lng"):
+                        tdx_arr = tdx_nearest_stop_name(line_name, arr_loc["lat"], arr_loc["lng"])
+                        if tdx_arr:
+                            arr_stop = tdx_arr
 
                 vehicle_emoji, vehicle_zh = vehicle_map.get(vehicle, ("🚌", vehicle))
                 line_name_zh = line_name_map.get(line_name, line_name)
@@ -398,7 +432,11 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
         if arrival_time_str:
             lines.append(f"🕗 指定到達時間：{arrival_time_str}\n")
 
-        if is_vague(first_leg["start_address"]) or is_vague(first_leg["end_address"]):
+        if not dest_is_precise:
+            vague_label = next((VAGUE_TYPE_LABELS[t] for t in dest_types if t in VAGUE_TYPE_LABELS), "概略地區")
+            lines.append(f"⚠️ 找不到「{orig_destination or destination}」的精確位置，Google 只解析到「{end_addr}」（{vague_label}）。\n"
+                         f"   下車站可能不準確，建議改說路名＋門牌號，例如「忠誠路二段50巷4號」。\n")
+        elif is_vague(first_leg["start_address"]) or is_vague(first_leg["end_address"]):
             lines.append("⚠️ 您輸入的地點較模糊，系統以下列地點計算，若有偏差請說更詳細的地址（例如附近的捷運站或路名）：\n")
 
         lines.append(f"📌 出發地：{start_addr}")

@@ -153,40 +153,69 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
     logger = _log.getLogger(__name__)
     logger.info(f"StopOfRoute keys: {list(dest_names.keys())}")
 
-    # 依 (RouteUID, Direction) 分組 ETA，且只保留 stop 真的在該路線上的
-    results = {}
+    # 每個 Direction 只選一個最佳 RouteUID：
+    # 優先選「有實際 ETA 秒數」的，再比站數（站數多 = 主線）
+    stop_count = {k: len(v) for k, v in valid_stops.items()}
+
+    # 先收集各 (uid, d) 的 ETA 清單
+    uid_dir_arrivals = {}  # (uid, d) → [(seconds, status), ...]
     for item in data:
         d = item.get("Direction", 0)
         if direction is not None and d != direction:
             continue
         uid = item.get("RouteUID", "")
-        key = (uid, d)
-        # 若有 StopOfRoute 資料，確認此站確實在路線上
-        if valid_stops and key in valid_stops:
-            stop_names_in_route = valid_stops[key]
-            if not any(stop_keyword in sn for sn in stop_names_in_route):
+        key_uid = (uid, d)
+        if valid_stops and key_uid in valid_stops:
+            if not any(stop_keyword in sn for sn in valid_stops[key_uid]):
                 continue
         seconds = item.get("EstimateTime")
         status = item.get("StopStatus")
-        if key not in results:
-            results[key] = []
-        results[key].append((seconds, status))
+        uid_dir_arrivals.setdefault(key_uid, []).append((seconds, status))
 
-    # 過濾掉全部班次都是「末班已過」或「今日未營運」的方向
-    results = {
-        key: arrivals for key, arrivals in results.items()
-        if any(s not in (3, 4) or s is None for _, s in arrivals)
-    }
+    # 每個 Direction 選最佳 RouteUID
+    best_uid_per_dir = {}  # d → uid
+    for (uid, d) in uid_dir_arrivals:
+        has_eta = any(s is not None for s, _ in uid_dir_arrivals[(uid, d)])
+        n_stops = stop_count.get((uid, d), 0)
+        if d not in best_uid_per_dir:
+            best_uid_per_dir[d] = (uid, has_eta, n_stops)
+        else:
+            cur_uid, cur_has_eta, cur_stops = best_uid_per_dir[d]
+            # 有 ETA 優先；同樣有 ETA 時選站數多的
+            if (has_eta, n_stops) > (cur_has_eta, cur_stops):
+                best_uid_per_dir[d] = (uid, has_eta, n_stops)
+
+    # 收集最佳 RouteUID 的 ETA，並去重（同方向秒數相差 <120 秒視為同一班車）
+    best_per_dir = {}
+    for d, (best_uid, _, _) in best_uid_per_dir.items():
+        key_uid = (best_uid, d)
+        raw = uid_dir_arrivals.get(key_uid, [])
+        # 去重：只保留不重複的班次（秒數差 >= 120 秒才算不同班）
+        deduped = []
+        for sec, status in sorted((x for x in raw if x[0] is not None), key=lambda x: x[0]):
+            if not deduped or sec - deduped[-1][0] >= 180:
+                deduped.append((sec, status))
+        # 末班/未營運的放最後
+        no_eta = [(sec, status) for sec, status in raw if sec is None]
+        arrivals = deduped + no_eta
+        best_per_dir[d] = {
+            "arrivals": arrivals,
+            "dest": dest_names.get(key_uid, ""),
+            "has_eta": bool(deduped),
+        }
+
+    # 過濾掉完全沒有到站秒數的方向
+    results = {d: v for d, v in best_per_dir.items() if v["has_eta"]}
 
     if not results:
         return f"找不到「{route_name}」在「{stop_name}」站的即時資料。"
 
     lines = [f"🚌 {route_name} ── {stop_name}\n"]
-    for key, arrivals in sorted(results.items(), key=lambda x: x[0][1]):
-        uid, d = key
-        dest = dest_names.get(key, "")
+    for d, entry in sorted(results.items()):
+        dest = entry["dest"]
         direction_label = f"往{dest}" if dest else ("方向一" if d == 0 else "方向二")
         lines.append(f"{direction_label}：")
+        arrivals = entry["arrivals"]
 
         arrivals_sorted = sorted(
             [a for a in arrivals if a[0] is not None],
@@ -200,6 +229,38 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
 
     lines.append("⚠️ 資料來源：TDX，僅供參考")
     return "\n".join(lines)
+
+
+def tdx_nearest_stop_name(route_name: str, lat: float, lng: float,
+                          city_code: str = "Taipei") -> str | None:
+    """
+    給定路線名稱和座標，從 TDX StopOfRoute 找最近的站牌名稱。
+    用於修正 Google Maps 回傳的站名與實際站牌不符的問題。
+    """
+    import math
+    try:
+        stops_data = tdx_get(
+            f"/v2/Bus/StopOfRoute/City/{city_code}/{route_name}",
+            {"$format": "JSON"}
+        )
+    except Exception:
+        return None
+
+    best_name = None
+    best_dist = float("inf")
+    for item in stops_data:
+        for stop in item.get("Stops", []):
+            pos = stop.get("StopPosition", {})
+            slat = pos.get("PositionLat")
+            slng = pos.get("PositionLon")
+            if slat is None or slng is None:
+                continue
+            # 用簡化歐氏距離（小範圍夠精確）
+            dist = math.hypot(slat - lat, slng - lng)
+            if dist < best_dist:
+                best_dist = dist
+                best_name = stop.get("StopName", {}).get("Zh_tw", "")
+    return best_name or None
 
 
 def parse_bus_query(user_message: str) -> dict:
