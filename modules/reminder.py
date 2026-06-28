@@ -287,8 +287,11 @@ def cancel_multi_reminders(user_id: str, indices: list) -> str:
             rid = row["id"]
             try:
                 _get_sb().table("reminders").delete().eq("id", rid).execute()
-                scheduler.remove_job(f"reminder_{rid}")
                 cancelled.append(row["content"])
+            except Exception:
+                pass
+            try:
+                scheduler.remove_job(f"reminder_{rid}")
             except Exception:
                 pass
 
