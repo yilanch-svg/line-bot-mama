@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⏰ 京京的提醒</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; background: #f5f5f5; color: #333; }
+  header { background: #D85A30; color: white; padding: 16px 20px; font-size: 20px; font-weight: bold; }
+  .container { max-width: 680px; margin: 0 auto; padding: 16px; }
+
+  .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .card h2 { font-size: 16px; font-weight: bold; margin-bottom: 14px; color: #555; }
+
+  label { display: block; font-size: 14px; color: #666; margin-bottom: 4px; margin-top: 12px; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=date], input[type=time], select, textarea {
+    width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px;
+    font-size: 16px; font-family: inherit; background: white;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: #D85A30; }
+
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+
+  .repeat-day { display: none; }
+  .repeat-day.show { display: block; }
+
+  .early-group { margin-top: 4px; }
+  .early-item { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .early-item label { margin: 0; font-size: 15px; color: #333; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .early-item input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: #D85A30; }
+  .early-time { width: 110px !important; flex: none; }
+  .early-time.hide { display: none; }
+
+  .style-group { display: flex; gap: 16px; margin-top: 6px; }
+  .style-group label { display: flex; align-items: center; gap: 6px; font-size: 15px; color: #333; cursor: pointer; margin: 0; }
+  .style-group input[type=radio] { accent-color: #D85A30; }
+
+  .btn-add { margin-top: 16px; background: #D85A30; color: white; border: none; border-radius: 8px;
+    padding: 12px; font-size: 17px; cursor: pointer; width: 100%; font-weight: bold; }
+  .btn-add:hover { background: #b84a22; }
+
+  .reminder-card { background: white; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; gap: 12px; align-items: center; }
+  .reminder-info { flex: 1; }
+  .reminder-time { font-size: 13px; color: #999; margin-bottom: 4px; }
+  .reminder-content { font-size: 16px; font-weight: bold; }
+  .reminder-meta { font-size: 12px; color: #bbb; margin-top: 3px; }
+  .btn-cancel { background: #fee; border: 1px solid #fcc; color: #c44; border-radius: 8px;
+    padding: 6px 14px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .btn-cancel:hover { background: #fdd; }
+
+  .empty { text-align: center; color: #bbb; font-size: 15px; padding: 24px 0; }
+  .msg { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-top: 12px; display: none; }
+  .msg.ok { background: #eafaf1; color: #2e7d52; display: block; }
+  .msg.err { background: #fdecea; color: #b71c1c; display: block; }
+
+  .tab-bar { display: flex; gap: 0; margin-bottom: 16px; background: white; border-radius: 12px;
+    overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .tab-bar button { flex: 1; padding: 12px; border: none; background: transparent; font-size: 15px;
+    cursor: pointer; border-bottom: 3px solid transparent; color: #999; }
+  .tab-bar button.active { color: #D85A30; border-bottom-color: #D85A30; font-weight: bold; }
+</style>
+</head>
+<body>
+<header>⏰ 提醒管理</header>
+<div class="container">
+
+  <div class="tab-bar">
+    <button class="active" onclick="switchTab('add')">➕ 新增提醒</button>
+    <button onclick="switchTab('list')">📋 查看提醒</button>
+  </div>
+
+  <!-- 新增提醒 -->
+  <div id="tab-add">
+    <div class="card">
+      <h2>新增提醒</h2>
+
+      <label>提醒對象</label>
+      <select id="target">
+        <option value="self">自己</option>
+        <option value="媽媽">媽媽</option>
+        <option value="爸爸">爸爸</option>
+        <option value="方方">方方</option>
+        <option value="伊嵐">伊嵐</option>
+      </select>
+
+      <label>提醒內容</label>
+      <input type="text" id="content" placeholder="例如：吃藥、看醫生">
+
+      <label>日期與時間</label>
+      <div class="row">
+        <input type="date" id="date">
+        <input type="time" id="time">
+      </div>
+
+      <label>重複方式</label>
+      <select id="repeat" onchange="onRepeatChange()">
+        <option value="">一次</option>
+        <option value="daily">每天</option>
+        <option value="weekly">每週</option>
+      </select>
+      <div class="repeat-day" id="repeat-day">
+        <label>星期幾</label>
+        <select id="weekday">
+          <option value="0">週一</option>
+          <option value="1">週二</option>
+          <option value="2">週三</option>
+          <option value="3">週四</option>
+          <option value="4">週五</option>
+          <option value="5">週六</option>
+          <option value="6">週日</option>
+        </select>
+      </div>
+
+      <label>提前提醒（可複選）</label>
+      <div class="early-group">
+        <div class="early-item">
+          <label><input type="checkbox" id="e-prev" onchange="toggleEarlyTime('prev')"> 前一天</label>
+          <input type="time" id="e-prev-time" class="early-time hide" placeholder="幾點">
+        </div>
+        <div class="early-item">
+          <label><input type="checkbox" id="e-same" onchange="toggleEarlyTime('same')"> 當天</label>
+          <input type="time" id="e-same-time" class="early-time hide" placeholder="幾點">
+        </div>
+        <div class="early-item">
+          <label><input type="checkbox" id="e-1h"> 提前1小時</label>
+        </div>
+        <div class="early-item">
+          <label><input type="checkbox" id="e-ontime" checked> 時間到再提醒</label>
+        </div>
+      </div>
+
+      <label>樣式</label>
+      <div class="style-group">
+        <label><input type="radio" name="style" value="normal" checked> 一般</label>
+        <label><input type="radio" name="style" value="fancy"> 浮誇 🎉</label>
+      </div>
+
+      <div id="msg-add" class="msg"></div>
+      <button class="btn-add" onclick="addReminder()">新增提醒</button>
+    </div>
+  </div>
+
+  <!-- 查看提醒 -->
+  <div id="tab-list" style="display:none">
+    <div class="card" style="padding:12px 16px">
+      <label style="margin:0">查看對象</label>
+      <select id="view-target" onchange="loadReminders()" style="margin-top:6px">
+        <option value="self">自己</option>
+        <option value="媽媽">媽媽</option>
+        <option value="爸爸">爸爸</option>
+        <option value="方方">方方</option>
+        <option value="伊嵐">伊嵐</option>
+      </select>
+    </div>
+    <div id="reminder-list"></div>
+  </div>
+
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const myUserId = params.get("user_id") || "";
+
+const FAMILY = {
+  "媽媽": "Uab8239f0b88f4061a5114be006f94f65",
+  "爸爸": "U50fdecc36506a8c66f0b8388b4c96708",
+  "方方": "Uae768e5517dd14f206df9896d781626d",
+  "伊嵐": "Ucfd1c15e7ef296b7892fe874d215d945",
+};
+
+// 設定自己預設是打開此頁面的 user_id
+if (myUserId) {
+  const myName = Object.entries(FAMILY).find(([n,id]) => id === myUserId)?.[0];
+  // 提醒對象預設自己
+  document.getElementById("target").value = myName || "self";
+  document.getElementById("view-target").value = myName || "self";
+}
+
+// 預設日期為今天
+const today = new Date();
+document.getElementById("date").value = today.toISOString().slice(0,10);
+document.getElementById("time").value = "09:00";
+
+function switchTab(t) {
+  document.getElementById("tab-add").style.display = t === "add" ? "" : "none";
+  document.getElementById("tab-list").style.display = t === "list" ? "" : "none";
+  document.querySelectorAll(".tab-bar button").forEach((b, i) => {
+    b.classList.toggle("active", (t === "add" && i === 0) || (t === "list" && i === 1));
+  });
+  if (t === "list") loadReminders();
+}
+
+function onRepeatChange() {
+  const v = document.getElementById("repeat").value;
+  document.getElementById("repeat-day").classList.toggle("show", v === "weekly");
+}
+
+function toggleEarlyTime(type) {
+  const cb = document.getElementById(`e-${type}`);
+  const inp = document.getElementById(`e-${type}-time`);
+  inp.classList.toggle("hide", !cb.checked);
+}
+
+function getTargetUserId(selectId) {
+  const val = document.getElementById(selectId).value;
+  if (val === "self") return myUserId;
+  return FAMILY[val] || "";
+}
+
+async function addReminder() {
+  const content = document.getElementById("content").value.trim();
+  const date = document.getElementById("date").value;
+  const time = document.getElementById("time").value;
+  const repeat = document.getElementById("repeat").value || null;
+  const fancy = document.querySelector('input[name=style]:checked').value === "fancy";
+  const targetUid = getTargetUserId("target");
+  const targetName = document.getElementById("target").value;
+  const setterName = myUserId ? (Object.entries(FAMILY).find(([n,id]) => id === myUserId)?.[0] || null) : null;
+
+  if (!content) { showMsg("add", "請填寫提醒內容", false); return; }
+  if (!date || !time) { showMsg("add", "請填寫日期和時間", false); return; }
+  if (!targetUid) { showMsg("add", "無法識別提醒對象，請確認連結含 user_id", false); return; }
+
+  const triggerTime = `${date}T${time}:00`;
+  const weekday = repeat === "weekly" ? parseInt(document.getElementById("weekday").value) : null;
+
+  // 收集提前提醒選項
+  const earlyList = [];
+  if (document.getElementById("e-prev").checked) {
+    const t = document.getElementById("e-prev-time").value || time;
+    earlyList.push({ type: "prev_day", time: t });
+  }
+  if (document.getElementById("e-same").checked) {
+    const t = document.getElementById("e-same-time").value || time;
+    earlyList.push({ type: "same_day", time: t });
+  }
+  if (document.getElementById("e-1h").checked) earlyList.push({ type: "minus_1h" });
+  if (document.getElementById("e-ontime").checked) earlyList.push({ type: "on_time" });
+  if (earlyList.length === 0) earlyList.push({ type: "on_time" });
+
+  const payload = {
+    user_id: targetUid,
+    setter_id: myUserId,
+    setter_name: targetUid !== myUserId ? setterName : null,
+    content,
+    trigger_time: triggerTime,
+    repeat,
+    weekday,
+    early_list: earlyList,
+    fancy,
+  };
+
+  try {
+    const res = await fetch("/api/reminders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { showMsg("add", data.error || "新增失敗", false); return; }
+    const label = targetName === "self" ? "自己" : targetName;
+    showMsg("add", `✅ 已幫 ${label} 新增 ${data.count} 筆提醒`, true);
+    document.getElementById("content").value = "";
+  } catch(e) {
+    showMsg("add", "新增失敗，請再試一次", false);
+  }
+}
+
+async function loadReminders() {
+  const uid = getTargetUserId("view-target");
+  if (!uid) { document.getElementById("reminder-list").innerHTML = '<p class="empty">無法識別用戶</p>'; return; }
+  const res = await fetch(`/api/reminders?user_id=${uid}`);
+  const rows = await res.json();
+  const el = document.getElementById("reminder-list");
+  if (!rows.length) { el.innerHTML = '<p class="empty">目前沒有提醒</p>'; return; }
+
+  const WD = ["週一","週二","週三","週四","週五","週六","週日"];
+  el.innerHTML = rows.map(r => {
+    const t = new Date(r.trigger_time);
+    const pad = n => String(n).padStart(2,"0");
+    let timeStr;
+    if (r.repeat === "daily") {
+      timeStr = `每天 ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    } else if (r.repeat === "weekly") {
+      timeStr = `每${WD[t.getDay() === 0 ? 6 : t.getDay()-1]} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    } else {
+      timeStr = `${pad(t.getMonth()+1)}/${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    }
+    const meta = [r.fancy ? "🎉 浮誇" : "", r.setter_name ? `由 ${r.setter_name} 設定` : ""].filter(Boolean).join("・");
+    return `<div class="reminder-card">
+      <div class="reminder-info">
+        <div class="reminder-time">${timeStr}${r.repeat ? "（重複）" : "（一次）"}</div>
+        <div class="reminder-content">${r.content}</div>
+        ${meta ? `<div class="reminder-meta">${meta}</div>` : ""}
+      </div>
+      <button class="btn-cancel" onclick="cancelReminder(${r.id})">取消</button>
+    </div>`;
+  }).join("");
+}
+
+async function cancelReminder(id) {
+  if (!confirm("確定取消這個提醒？")) return;
+  await fetch(`/api/reminders/${id}`, { method: "DELETE" });
+  loadReminders();
+}
+
+function showMsg(zone, text, ok) {
+  const el = document.getElementById(`msg-${zone}`);
+  el.textContent = text;
+  el.className = `msg ${ok ? "ok" : "err"}`;
+  setTimeout(() => el.className = "msg", 4000);
+}
+</script>
+</body>
+</html>

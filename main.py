@@ -11,7 +11,7 @@ env_path = pathlib.Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 import logging
-from flask import Flask, request, abort
+from flask import Flask, request, abort, render_template, jsonify
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -236,7 +236,11 @@ https://pda5284.gov.taipei/MQS/routelist.jsp""",
 【幫家人查看／取消】
 ・「幫媽媽查提醒」
 ・「幫媽媽取消提醒 1」
-・「幫媽媽取消提醒 1,2」""",
+・「幫媽媽取消提醒 1,2」
+
+──────────────────
+🌐 也可以用網頁設定提醒：
+說「我的提醒」可取得個人連結""",
 
     "問大小事說明": "【進入問大小事模式】",  # 動態處理，見 handle_message
 }
@@ -403,6 +407,8 @@ def handle_reminder(user_id: str, user_text: str) -> str:
         result = list_reminders(target_uid)
         if proxy_name:
             result = result.replace("📋 您的提醒清單", f"📋 {proxy_name}的提醒清單", 1)
+        render_url = os.getenv("RENDER_URL", "https://line-bot-mama.onrender.com")
+        result += f"\n\n🌐 網頁版管理：\n{render_url}/reminders?user_id={target_uid}"
         return result
     if action == "cancel":
         result = cancel_reminder(target_uid, parsed["index"])
@@ -722,6 +728,101 @@ def api_notes_delete(note_id):
     sb = get_client()
     sb.table("notes").delete().eq("id", note_id).execute()
     return jsonify({"ok": True})
+
+
+@app.route("/reminders", methods=["GET"])
+def reminders_page():
+    return render_template("reminders.html")
+
+
+@app.route("/api/reminders", methods=["GET"])
+def api_reminders_get():
+    user_id = request.args.get("user_id", "")
+    if not user_id:
+        return jsonify([])
+    try:
+        rows = _get_sb().table("reminders").select("*").eq("user_id", user_id).order("trigger_time").execute().data
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"api_reminders_get failed: {e}")
+        return jsonify([])
+
+
+@app.route("/api/reminders", methods=["POST"])
+def api_reminders_post():
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo("Asia/Taipei")
+    data = request.get_json()
+    user_id = data.get("user_id", "")
+    content = (data.get("content") or "").strip()
+    trigger_time_str = data.get("trigger_time", "")
+    repeat = data.get("repeat") or None
+    fancy = bool(data.get("fancy", False))
+    setter_name = data.get("setter_name") or None
+    early_list = data.get("early_list") or [{"type": "on_time"}]
+
+    if not user_id or not content or not trigger_time_str:
+        return jsonify({"error": "缺少必要欄位"}), 400
+
+    try:
+        base_time = datetime.fromisoformat(trigger_time_str).astimezone(TZ)
+    except Exception:
+        return jsonify({"error": "時間格式錯誤"}), 400
+
+    weekday = data.get("weekday")
+
+    # 若是每週，把 trigger_time 的星期調整到指定星期
+    if repeat == "weekly" and weekday is not None:
+        days_ahead = (int(weekday) - base_time.weekday()) % 7
+        base_time = base_time + timedelta(days=days_ahead)
+
+    inserted = 0
+    sb = _get_sb()
+    for item in early_list:
+        t = item.get("type")
+        if t == "on_time":
+            fire_at = base_time
+        elif t == "minus_1h":
+            fire_at = base_time - timedelta(hours=1)
+        elif t == "prev_day":
+            early_time_str = item.get("time", base_time.strftime("%H:%M"))
+            h, m = map(int, early_time_str.split(":"))
+            fire_at = (base_time - timedelta(days=1)).replace(hour=h, minute=m, second=0, microsecond=0)
+        elif t == "same_day":
+            early_time_str = item.get("time", base_time.strftime("%H:%M"))
+            h, m = map(int, early_time_str.split(":"))
+            fire_at = base_time.replace(hour=h, minute=m, second=0, microsecond=0)
+        else:
+            continue
+
+        label = "提前提醒：" if t not in ("on_time",) else ""
+        row_content = f"{label}{content}" if label else content
+
+        try:
+            sb.table("reminders").insert({
+                "user_id": user_id,
+                "content": row_content,
+                "trigger_time": fire_at.isoformat(),
+                "repeat": repeat,
+                "fancy": fancy,
+                "setter_name": setter_name,
+            }).execute()
+            inserted += 1
+        except Exception as e:
+            logger.error(f"api_reminders_post insert failed: {e}")
+
+    return jsonify({"ok": True, "count": inserted})
+
+
+@app.route("/api/reminders/<int:rid>", methods=["DELETE"])
+def api_reminders_delete(rid):
+    try:
+        _get_sb().table("reminders").delete().eq("id", rid).execute()
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.error(f"api_reminders_delete failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])
