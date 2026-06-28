@@ -47,13 +47,7 @@ def _build_flex(content: str, time_str: str, setter_name: str = None) -> dict:
                 "layout": "vertical",
                 "contents": [
                     {"type": "text", "text": content, "size": "xl", "weight": "bold", "wrap": True},
-                    {
-                        "type": "box", "layout": "horizontal", "margin": "md",
-                        "contents": [
-                            {"type": "icon", "url": "https://scdn.line-apps.com/n/channel_devcenter/img/fx/01_1_cafe.png", "size": "xs"},
-                            {"type": "text", "text": time_str, "size": "sm", "color": "#888780", "margin": "sm"},
-                        ],
-                    },
+                    {"type": "text", "text": f"⏰ {time_str}", "size": "sm", "color": "#888780", "margin": "md"},
                 ],
             },
         },
@@ -74,6 +68,7 @@ def _send_push(user_id: str, text: str, reminder_id: int = None, setter_name: st
             text = f"{text}\n（{setter_name}幫您設定）"
         messages = [{"type": "text", "text": text}]
 
+    success = False
     try:
         resp = httpx.post(
             "https://api.line.me/v2/bot/message/push",
@@ -85,15 +80,10 @@ def _send_push(user_id: str, text: str, reminder_id: int = None, setter_name: st
             logger.error(f"Push message failed: {resp.status_code} {resp.text}")
         else:
             logger.info(f"Push message ok: user={user_id}")
+            success = True
     except Exception as e:
         logger.error(f"Push message failed: {e}")
-
-    # 一次性提醒發送後從 DB 刪除
-    if reminder_id:
-        try:
-            _get_sb().table("reminders").delete().eq("id", reminder_id).execute()
-        except Exception as e:
-            logger.error(f"Delete reminder failed: {e}")
+    return success
 
 
 def _schedule_from_db(row: dict):
@@ -218,14 +208,15 @@ def check_and_send_due_reminders():
                 should_send = False
 
             if should_send:
-                _send_push(user_id, msg, setter_name=setter_name, fancy=fancy)
-                if repeat is None:
-                    sb.table("reminders").delete().eq("id", rid).execute()
-                else:
-                    sb.table("reminders").update(
-                        {"last_sent_at": now.isoformat()}
-                    ).eq("id", rid).execute()
-                logger.info(f"check_reminders: sent rid={rid} user={user_id}")
+                ok = _send_push(user_id, msg, setter_name=setter_name, fancy=fancy)
+                if ok:
+                    if repeat is None:
+                        sb.table("reminders").delete().eq("id", rid).execute()
+                    else:
+                        sb.table("reminders").update(
+                            {"last_sent_at": now.isoformat()}
+                        ).eq("id", rid).execute()
+                    logger.info(f"check_reminders: sent rid={rid} user={user_id}")
         except Exception as e:
             logger.error(f"check_reminders row {row.get('id')} failed: {e}")
 
