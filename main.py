@@ -55,10 +55,61 @@ conversation_memory: dict[str, list] = {}
 bus_query_state: dict[str, dict] = {}
 # 路線查詢暫存
 transit_query_state: dict[str, dict] = {}
-# 提醒設定暫存
-reminder_setup_state: dict[str, dict] = {}
 # QA 模式中的用戶
 qa_mode_users: set[str] = set()
+
+
+def _get_sb():
+    from supabase import create_client
+    return create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SECRET_KEY"))
+
+
+def _rss_get(user_id: str) -> dict | None:
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        TZ = ZoneInfo("Asia/Taipei")
+        row = _get_sb().table("reminder_setup_state").select("state").eq("user_id", user_id).execute().data
+        if not row:
+            return None
+        state = row[0]["state"]
+        for key in ("trigger_time", "prev_day_time", "same_day_time"):
+            if state.get(key):
+                state[key] = datetime.fromisoformat(state[key]).astimezone(TZ)
+        return state
+    except Exception as e:
+        logger.error(f"rss_get failed: {e}")
+        return None
+
+
+def _rss_set(user_id: str, state: dict):
+    try:
+        serialized = {}
+        for k, v in state.items():
+            if hasattr(v, "isoformat"):
+                serialized[k] = v.isoformat()
+            else:
+                serialized[k] = v
+        _get_sb().table("reminder_setup_state").upsert(
+            {"user_id": user_id, "state": serialized, "updated_at": "now()"}
+        ).execute()
+    except Exception as e:
+        logger.error(f"rss_set failed: {e}")
+
+
+def _rss_del(user_id: str):
+    try:
+        _get_sb().table("reminder_setup_state").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.error(f"rss_del failed: {e}")
+
+
+def _rss_has(user_id: str) -> bool:
+    try:
+        row = _get_sb().table("reminder_setup_state").select("user_id").eq("user_id", user_id).execute().data
+        return bool(row)
+    except Exception:
+        return False
 
 MAX_HISTORY_TURNS = 10
 
@@ -254,7 +305,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
     fancy = "#浮誇" in user_text
     user_text = user_text.replace("#浮誇", "").strip()
 
-    state = reminder_setup_state.get(target_uid)
+    state = _rss_get(target_uid)
 
     # 代設模式下，多輪對話不適用（直接進入新指令解析）
     if not proxy_uid and state:
@@ -273,7 +324,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             else:
                 return f"請說「早上」或「下午」或「晚上」"
             state["step"] = "ask_mode"
-            reminder_setup_state[target_uid] = state
+            _rss_set(target_uid, state)
             t_str = state["trigger_time"].strftime("%m/%d %H:%M")
             return (
                 f"好的！{state['content']}時間：{t_str}\n\n"
@@ -288,7 +339,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             if parsed2.get("trigger_time"):
                 state["trigger_time"] = parsed2["trigger_time"]
                 state["step"] = "ask_mode"
-                reminder_setup_state[target_uid] = state
+                _rss_set(target_uid, state)
                 t_str = parsed2["trigger_time"].strftime("%m/%d %H:%M")
                 return (
                     f"好的！{state['content']}時間：{t_str}\n\n"
@@ -378,7 +429,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
         if parsed.get("trigger_time") and not any(
             kw in user_text for kw in ["早上", "上午", "中午", "下午", "晚上", "凌晨", "分鐘後", "小時後"]
         ):
-            reminder_setup_state[target_uid] = {
+            _rss_set(target_uid, {
                 "step": "ask_ampm",
                 "content": parsed["content"],
                 "trigger_time": parsed["trigger_time"],
@@ -387,13 +438,13 @@ def handle_reminder(user_id: str, user_text: str) -> str:
                 "pending": [],
                 "prev_day_time": None,
                 "same_day_time": None,
-            }
+            })
             t_str = parsed["trigger_time"].strftime("%m/%d %H:%M")
             return f"請問「{parsed['content']}」是早上還是下午/晚上 {parsed['trigger_time'].strftime('%H:%M')}？\n請說「早上」或「下午」或「晚上」"
 
         # 有內容但沒有時間，先問時間
         if not parsed.get("trigger_time"):
-            reminder_setup_state[target_uid] = {
+            _rss_set(target_uid, {
                 "step": "ask_time",
                 "content": parsed["content"],
                 "trigger_time": None,
@@ -402,11 +453,11 @@ def handle_reminder(user_id: str, user_text: str) -> str:
                 "pending": [],
                 "prev_day_time": None,
                 "same_day_time": None,
-            }
+            })
             return f"好的！請問幾點要{parsed['content']}？\n（請說早上或晚上，例如「早上10點」）"
 
         # 一次性提醒：問提前模式
-        reminder_setup_state[target_uid] = {
+        _rss_set(target_uid, {
             "step": "ask_mode",
             "content": parsed["content"],
             "trigger_time": parsed["trigger_time"],
@@ -415,7 +466,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             "pending": [],
             "prev_day_time": None,
             "same_day_time": None,
-        }
+        })
         t_str = parsed["trigger_time"].strftime("%m/%d %H:%M")
         return (
             f"好的！{parsed['content']}時間：{t_str}\n\n"
@@ -433,18 +484,18 @@ def _ask_mode_time(user_id: str, state: dict) -> str:
     next_mode = state["pending"][0]
     if next_mode == 1:
         state["step"] = "ask_prev_day_time"
-        reminder_setup_state[user_id] = state
+        _rss_set(user_id, state)
         return "前一天幾點提醒您？\n請說清楚早上或晚上，例如：\n・「早上7點」\n・「晚上9點」"
     elif next_mode == 2:
         state["step"] = "ask_same_day_time"
-        reminder_setup_state[user_id] = state
+        _rss_set(user_id, state)
         return "當天幾點提醒您？\n請說清楚早上或晚上，例如：\n・「早上7點」\n・「晚上9點」"
     return ""
 
 
 def _finalize_reminder(user_id: str, state: dict, modes: list, now) -> str:
     from datetime import timedelta
-    reminder_setup_state.pop(user_id, None)
+    _rss_del(user_id)
     content = state["content"]
     trigger_time = state["trigger_time"]
     lines = [f"✅ 已設定提醒：{content}"]
@@ -507,7 +558,7 @@ def handle_message(user_id: str, user_text: str) -> str:
         intent = "bus"
     elif user_id in transit_query_state:
         intent = "transit"
-    elif user_id in reminder_setup_state:
+    elif _rss_has(user_id):
         intent = "reminder"
     elif user_id in qa_mode_users:
         intent = "qa"
