@@ -172,6 +172,12 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
             results[key] = []
         results[key].append((seconds, status))
 
+    # 過濾掉全部班次都是「末班已過」或「今日未營運」的方向
+    results = {
+        key: arrivals for key, arrivals in results.items()
+        if any(s not in (3, 4) or s is None for _, s in arrivals)
+    }
+
     if not results:
         return f"找不到「{route_name}」在「{stop_name}」站的即時資料。"
 
