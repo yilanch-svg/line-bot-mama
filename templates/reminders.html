@@ -232,7 +232,7 @@ async function addReminder() {
   if (!date || !time) { showMsg("add", "請填寫日期和時間", false); return; }
   if (!targetUid) { showMsg("add", "無法識別提醒對象，請確認連結含 user_id", false); return; }
 
-  const triggerTime = `${date}T${time}:00`;
+  const triggerTime = `${date}T${time}:00+08:00`;
   const weekday = repeat === "weekly" ? parseInt(document.getElementById("weekday").value) : null;
 
   // 收集提前提醒選項
