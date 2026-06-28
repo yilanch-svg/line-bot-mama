@@ -95,26 +95,34 @@ def format_estimate(seconds: int | None, status: int | None) -> str:
     return f"約 {hours} 小時 {mins} 分鐘後到站"
 
 
-def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int | None = None) -> str:
+def get_bus_arrival(route_name: str, stop_name: str, city: str,
+                    direction: int | None = None, exact: bool = False) -> str:
     """
     查詢公車即時到站時間
     route_name: 路線名稱，例如 "1"、"敦化幹線"
     stop_name: 站名，例如 "台北車站"
     city: 城市名稱（中文），例如 "台北"
-    direction: 0=去程, 1=返程, None=兩個方向都查
+    exact: True 時用精確比對（從子站選單選出的站名），避免 replace("站","") 誤刪
     """
     city_code = CITY_CODE.get(city)
     if not city_code:
         return f"抱歉，目前不支援「{city}」的公車查詢。"
 
     try:
-        # 查詢該路線在指定站的即時到站資料
         path = f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}"
-        stop_keyword = stop_name.replace("站", "")
-        params = {
-            "$filter": f"contains(StopName/Zh_tw,'{stop_keyword}')",
-            "$format": "JSON",
-        }
+        if exact:
+            # 精確站名（從 TDX 取得），直接用 eq 比對，避免 replace 誤刪字
+            stop_keyword = stop_name
+            params = {
+                "$filter": f"StopName/Zh_tw eq '{stop_name}'",
+                "$format": "JSON",
+            }
+        else:
+            stop_keyword = stop_name.replace("站", "")
+            params = {
+                "$filter": f"contains(StopName/Zh_tw,'{stop_keyword}')",
+                "$format": "JSON",
+            }
         data = tdx_get(path, params)
     except Exception as e:
         import logging
@@ -122,8 +130,10 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
         return "公車資料暫時無法取得，請稍後再試。"
 
     # 只保留站名以關鍵字開頭的資料（排除如「信義松仁路口(松仁)」這類不同站）
-    data = [item for item in data
-            if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
+    # exact 模式已用 eq 精確比對，不需要再過濾
+    if not exact:
+        data = [item for item in data
+                if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
 
     if not data:
         return (

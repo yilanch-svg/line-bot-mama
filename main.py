@@ -155,7 +155,7 @@ def handle_bus(user_id: str, user_text: str) -> str:
             route = state["route"]
             city = state["city"]
             bus_query_state.pop(user_id, None)
-            return get_bus_arrival(route, exact_stop, city)
+            return get_bus_arrival(route, exact_stop, city, exact=True)
         except (ValueError, TypeError):
             lines = [f"請輸入數字選擇站牌："]
             for i, name in enumerate(options, 1):
