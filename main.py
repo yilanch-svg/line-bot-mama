@@ -27,7 +27,7 @@ from modules.intent import detect_intent
 from modules.weather import get_weather_forecast
 from modules.qa import get_qa_response
 from modules.bus import get_bus_arrival, parse_bus_query
-from modules.transit import get_directions, parse_transit_query
+from modules.transit import get_directions, parse_transit_query, check_location_precision
 from modules.notes import add_note, search_notes, delete_note, delete_last_note, parse_note_query
 from modules.reminder import add_reminder, list_reminders, cancel_reminder, cancel_multi_reminders, cancel_all_reminders, parse_reminder, scheduler, load_reminders_from_db
 
@@ -610,7 +610,11 @@ def handle_message(user_id: str, user_text: str) -> str:
         state = transit_query_state.get(user_id, {})
         parsed = parse_transit_query(user_text)
         origin = parsed.get("origin") or state.get("origin")
-        destination = parsed.get("destination") or state.get("destination")
+        # 若上一輪是要求使用者補充目的地，這輪直接把訊息當新目的地
+        if state.get("dest_confirmed"):
+            destination = parsed.get("destination") or user_text.strip()
+        else:
+            destination = parsed.get("destination") or state.get("destination")
 
         arrival_time = parsed.get("arrival_time") or state.get("arrival_time")
         query_type = parsed.get("query_type", "route")
@@ -622,11 +626,22 @@ def handle_message(user_id: str, user_text: str) -> str:
             transit_query_state[user_id] = {"origin": origin, "arrival_time": arrival_time}
             reply = f"從「{origin}」出發，請問要去哪裡呢？"
         else:
-            transit_query_state.pop(user_id, None)
-            reply = get_directions(origin or "家裡", destination,
-                                   orig_destination=destination,
-                                   arrival_time_str=arrival_time,
-                                   query_type=query_type)
+            # 目的地精確度檢查：不夠精確時先問清楚，不直接查路線
+            dest_info = check_location_precision(destination)
+            if not dest_info["precise"] and not state.get("dest_confirmed"):
+                transit_query_state[user_id] = {
+                    "origin": origin, "arrival_time": arrival_time,
+                    "destination": destination, "dest_confirmed": True,
+                }
+                reply = (f"找不到「{destination}」的精確位置，"
+                         f"Google 只識別到「{dest_info['resolved']}」（{dest_info['vague_label']}）。\n\n"
+                         f"請提供更詳細的地址，例如路名＋門牌號：")
+            else:
+                transit_query_state.pop(user_id, None)
+                reply = get_directions(origin or "家裡", destination,
+                                       orig_destination=destination,
+                                       arrival_time_str=arrival_time,
+                                       query_type=query_type)
 
     elif intent == "note":
         parsed = parse_note_query(user_text)
