@@ -542,6 +542,19 @@ def handle_message(user_id: str, user_text: str) -> str:
     """根據意圖分派到對應模組，回傳回覆文字"""
 
     # Rich Menu 說明
+    if user_text == "查提醒說明":
+        render_url = os.getenv("RENDER_URL", "https://line-bot-mama.onrender.com")
+        url = f"{render_url}/reminders?user_id={user_id}"
+        return (
+            "⏰ 提醒功能\n\n"
+            "【用說的設定】\n"
+            "・「提醒我明天早上8點吃藥」\n"
+            "・「每天晚上9點提醒我喝水」\n"
+            "・「幫媽媽提醒下午3點看醫生 #浮誇」\n\n"
+            "【用網頁設定（更方便）】\n"
+            f"{url}\n\n"
+            "⚠️ 此連結只限本人使用，請勿傳給他人"
+        )
     if user_text == "查筆記說明":
         url = f"https://line-bot-mama.onrender.com/notes?user_id={user_id}"
         return (
