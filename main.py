@@ -152,24 +152,32 @@ https://pda5284.gov.taipei/MQS/routelist.jsp""",
 
     # 查筆記說明 改為動態產生（含 user_id 連結），見 handle_message
 
-    "查提醒說明": """⏰ 我的提醒
+    "查提醒說明": """⏰ 提醒功能說明
 
-必須包含【提醒】和【時間】
-
-【一次性】
+【自己的提醒】
 ・「提醒我明天早上8點吃藥」
 ・「提醒我今天下午3點30分開會」
 ・「提醒我30分鐘後關火」
-
-【重複】
 ・「每天晚上9點提醒我喝水」
 ・「每週五下午3點提醒我領藥」
 
-【查看／取消】
+【查看／取消自己的】
 ・「我的提醒」查看清單
 ・「取消提醒 1」取消單筆
 ・「取消提醒 1,2,3」取消多筆
-・「取消全部提醒」全部清除""",
+・「取消全部提醒」全部清除
+
+──────────────────
+【幫家人設定提醒】
+可用名字：媽媽、爸爸、方方（或姊姊）、伊嵐（或妹妹）
+可加 #浮誇 送卡片樣式提醒
+・「幫媽媽提醒明天早上9點吃藥」
+・「幫爸爸提醒下午3點看醫生 #浮誇」
+
+【幫家人查看／取消】
+・「幫媽媽查提醒」
+・「幫媽媽取消提醒 1」
+・「幫媽媽取消提醒 1,2」""",
 
     "問大小事說明": """💬 問大小事
 
@@ -200,10 +208,30 @@ def _parse_time_input(text: str, base_date):
 
 
 def _parse_modes(text: str) -> list[int]:
-    """解析選擇的提醒模式，例如「1和2」「1,2,3」「3」"""
+    """解析選擇的提醒模式，支援阿拉伯數字和國字"""
     import re
-    nums = re.findall(r"[1-4]", text)
+    CN = {"一": "1", "二": "2", "三": "3", "四": "4"}
+    normalized = text
+    for cn, ar in CN.items():
+        normalized = normalized.replace(cn, ar)
+    nums = re.findall(r"[1-4]", normalized)
     return sorted(set(int(n) for n in nums))
+
+
+FAMILY_ALIAS = {
+    "媽媽": ("Uab8239f0b88f4061a5114be006f94f65", "媽媽"),
+    "雷京": ("Uab8239f0b88f4061a5114be006f94f65", "媽媽"),
+    "爸爸": ("U50fdecc36506a8c66f0b8388b4c96708", "爸爸"),
+    "松哥": ("U50fdecc36506a8c66f0b8388b4c96708", "爸爸"),
+    "方方": ("Uae768e5517dd14f206df9896d781626d", "方方"),
+    "姊姊": ("Uae768e5517dd14f206df9896d781626d", "方方"),
+    "伊嵐": ("Ucfd1c15e7ef296b7892fe874d215d945", "伊嵐"),
+    "妹妹": ("Ucfd1c15e7ef296b7892fe874d215d945", "伊嵐"),
+}
+
+USER_DISPLAY_NAME = {
+    "Ucfd1c15e7ef296b7892fe874d215d945": "伊嵐",
+}
 
 
 def handle_reminder(user_id: str, user_text: str) -> str:
@@ -212,10 +240,33 @@ def handle_reminder(user_id: str, user_text: str) -> str:
     TZ = ZoneInfo("Asia/Taipei")
     now = datetime.now(TZ)
 
-    state = reminder_setup_state.get(user_id)
+    # 代設提醒：「幫媽媽提醒...」→ 改用對方 user_id，並替換回覆稱謂
+    import re as _re
+    proxy_name = None
+    proxy_uid = None
+    m = _re.match(r"幫(媽媽|雷京|爸爸|松哥|方方|姊姊|伊嵐|妹妹)(提醒|設提醒|查提醒|取消提醒)", user_text)
+    if m:
+        alias = m.group(1)
+        proxy_uid, proxy_name = FAMILY_ALIAS[alias]
+        action_word = m.group(2)
+        # 把「幫XXX」去掉，剩下當作正常提醒指令
+        user_text = user_text[m.end():]
+        if action_word == "查提醒":
+            user_text = "我的提醒"
+        elif action_word == "取消提醒":
+            user_text = "取消提醒" + user_text
+        elif not user_text.startswith("提醒"):
+            user_text = "提醒" + user_text
 
-    # ── 多輪狀態中 ──────────────────────────────────────────
-    if state:
+    target_uid = proxy_uid if proxy_uid else user_id
+    setter_name = USER_DISPLAY_NAME.get(user_id) if proxy_uid else None
+    fancy = "#浮誇" in user_text
+    user_text = user_text.replace("#浮誇", "").strip()
+
+    state = reminder_setup_state.get(target_uid)
+
+    # 代設模式下，多輪對話不適用（直接進入新指令解析）
+    if not proxy_uid and state:
         step = state["step"]
 
         # 等待早上/下午確認
@@ -231,7 +282,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             else:
                 return f"請說「早上」或「下午」或「晚上」"
             state["step"] = "ask_mode"
-            reminder_setup_state[user_id] = state
+            reminder_setup_state[target_uid] = state
             t_str = state["trigger_time"].strftime("%m/%d %H:%M")
             return (
                 f"好的！{state['content']}時間：{t_str}\n\n"
@@ -246,7 +297,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             if parsed2.get("trigger_time"):
                 state["trigger_time"] = parsed2["trigger_time"]
                 state["step"] = "ask_mode"
-                reminder_setup_state[user_id] = state
+                reminder_setup_state[target_uid] = state
                 t_str = parsed2["trigger_time"].strftime("%m/%d %H:%M")
                 return (
                     f"好的！{state['content']}時間：{t_str}\n\n"
@@ -269,10 +320,10 @@ def handle_reminder(user_id: str, user_text: str) -> str:
 
             # 模式4或3不需要問時間，直接設定
             if not state["pending"]:
-                return _finalize_reminder(user_id, state, modes, now)
+                return _finalize_reminder(target_uid, state, modes, now)
 
             # 問第一個需要時間的模式
-            return _ask_mode_time(user_id, state)
+            return _ask_mode_time(target_uid, state)
 
         # 等待前一天時間
         if step == "ask_prev_day_time":
@@ -282,8 +333,8 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             state["prev_day_time"] = t
             state["pending"].pop(0)
             if state["pending"]:
-                return _ask_mode_time(user_id, state)
-            return _finalize_reminder(user_id, state, state["modes"], now)
+                return _ask_mode_time(target_uid, state)
+            return _finalize_reminder(target_uid, state, state["modes"], now)
 
         # 等待當天時間
         if step == "ask_same_day_time":
@@ -293,32 +344,50 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             state["same_day_time"] = t
             state["pending"].pop(0)
             if state["pending"]:
-                return _ask_mode_time(user_id, state)
-            return _finalize_reminder(user_id, state, state["modes"], now)
+                return _ask_mode_time(target_uid, state)
+            return _finalize_reminder(target_uid, state, state["modes"], now)
 
     # ── 新的提醒指令 ─────────────────────────────────────────
     parsed = parse_reminder(user_text)
     action = parsed.get("action")
 
     if action == "list":
-        return list_reminders(user_id)
+        result = list_reminders(target_uid)
+        if proxy_name:
+            result = result.replace("📋 您的提醒清單", f"📋 {proxy_name}的提醒清單", 1)
+        return result
     if action == "cancel":
-        return cancel_reminder(user_id, parsed["index"])
+        result = cancel_reminder(target_uid, parsed["index"])
+        return result.replace("✅ 已取消", f"✅ 已幫{proxy_name}取消", 1) if proxy_name else result
     if action == "cancel_multi":
-        return cancel_multi_reminders(user_id, parsed["indices"])
+        result = cancel_multi_reminders(target_uid, parsed["indices"])
+        return result.replace("✅ 已取消", f"✅ 已幫{proxy_name}取消", 1) if proxy_name else result
     if action == "cancel_all":
-        return cancel_all_reminders(user_id)
+        result = cancel_all_reminders(target_uid)
+        return result.replace("✅ 已取消", f"✅ 已幫{proxy_name}取消", 1) if proxy_name else result
     if action == "add":
         repeat = parsed.get("repeat")
+        prefix = f"已幫{proxy_name}" if proxy_name else ""
+
         # 重複提醒不問提前，直接設定
         if repeat:
-            return add_reminder(user_id, parsed["content"], parsed["trigger_time"], repeat)
+            result = add_reminder(target_uid, parsed["content"], parsed["trigger_time"], repeat, setter_name, fancy)
+            return result.replace("✅ 已設定", f"✅ {prefix}設定", 1) if proxy_name else result
+
+        # 代設提醒：不走多輪流程，直接設定（一次性，選「時間到」模式）
+        if proxy_name:
+            if not parsed.get("trigger_time"):
+                return f"請加上時間，例如：\n幫{proxy_name}提醒明天早上8點吃藥"
+            if not any(kw in user_text for kw in ["早上", "上午", "中午", "下午", "晚上", "凌晨", "分鐘後", "小時後"]):
+                return f"請說清楚早上還是下午/晚上，例如：\n幫{proxy_name}提醒明天早上8點吃藥"
+            result = add_reminder(target_uid, parsed["content"], parsed["trigger_time"], setter_name=setter_name, fancy=fancy)
+            return result.replace("✅ 已設定", f"✅ 已幫{proxy_name}設定", 1)
 
         # 有時間但沒說早上/下午，先問清楚
         if parsed.get("trigger_time") and not any(
             kw in user_text for kw in ["早上", "上午", "中午", "下午", "晚上", "凌晨", "分鐘後", "小時後"]
         ):
-            reminder_setup_state[user_id] = {
+            reminder_setup_state[target_uid] = {
                 "step": "ask_ampm",
                 "content": parsed["content"],
                 "trigger_time": parsed["trigger_time"],
@@ -333,7 +402,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
 
         # 有內容但沒有時間，先問時間
         if not parsed.get("trigger_time"):
-            reminder_setup_state[user_id] = {
+            reminder_setup_state[target_uid] = {
                 "step": "ask_time",
                 "content": parsed["content"],
                 "trigger_time": None,
@@ -346,7 +415,7 @@ def handle_reminder(user_id: str, user_text: str) -> str:
             return f"好的！請問幾點要{parsed['content']}？\n（請說早上或晚上，例如「早上10點」）"
 
         # 一次性提醒：問提前模式
-        reminder_setup_state[user_id] = {
+        reminder_setup_state[target_uid] = {
             "step": "ask_mode",
             "content": parsed["content"],
             "trigger_time": parsed["trigger_time"],

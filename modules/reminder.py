@@ -25,15 +25,60 @@ def _get_sb():
     return create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SECRET_KEY"))
 
 
-def _send_push(user_id: str, text: str, reminder_id: int = None):
+def _build_flex(content: str, time_str: str, setter_name: str = None) -> dict:
+    """建立浮誇版 Flex Message"""
+    subtitle = f"{setter_name}幫您設定" if setter_name else "提醒通知"
+    return {
+        "type": "flex",
+        "altText": f"⏰ 提醒您：{content}",
+        "contents": {
+            "type": "bubble",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#D85A30",
+                "contents": [
+                    {"type": "text", "text": subtitle, "size": "xs", "color": "#F0997B", "weight": "bold"},
+                    {"type": "text", "text": "提醒時間到了！", "size": "xl", "color": "#FAECE7", "weight": "bold"},
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": content, "size": "xl", "weight": "bold", "wrap": True},
+                    {
+                        "type": "box", "layout": "horizontal", "margin": "md",
+                        "contents": [
+                            {"type": "icon", "url": "https://scdn.line-apps.com/n/channel_devcenter/img/fx/01_1_cafe.png", "size": "xs"},
+                            {"type": "text", "text": time_str, "size": "sm", "color": "#888780", "margin": "sm"},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _send_push(user_id: str, text: str, reminder_id: int = None, setter_name: str = None, fancy: bool = False):
     """發送 LINE Push Message，一次性提醒發完後從 DB 刪除"""
     import httpx
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+    now_str = datetime.now(TZ).strftime("%m/%d %H:%M")
+
+    if fancy:
+        content = text.replace("⏰ 提醒您：", "")
+        messages = [_build_flex(content, now_str, setter_name)]
+    else:
+        if setter_name:
+            text = f"{text}\n（{setter_name}幫您設定）"
+        messages = [{"type": "text", "text": text}]
+
     try:
         httpx.post(
             "https://api.line.me/v2/bot/message/push",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"to": user_id, "messages": [{"type": "text", "text": text}]},
+            json={"to": user_id, "messages": messages},
             timeout=10,
         )
     except Exception as e:
@@ -100,7 +145,7 @@ def load_reminders_from_db():
 
 
 def add_reminder(user_id: str, content: str, trigger_time: datetime,
-                 repeat: str = None) -> str:
+                 repeat: str = None, setter_name: str = None, fancy: bool = False) -> str:
     msg = f"⏰ 提醒您：{content}"
     now = datetime.now(TZ)
 
@@ -123,7 +168,7 @@ def add_reminder(user_id: str, content: str, trigger_time: datetime,
     if repeat == "daily":
         trigger = CronTrigger(hour=trigger_time.hour, minute=trigger_time.minute,
                               timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg],
+        scheduler.add_job(_send_push, trigger, args=[user_id, msg, None, setter_name, fancy],
                           id=job_id, replace_existing=True)
         time_str = trigger_time.strftime("%H:%M")
         return f"✅ 已設定每天 {time_str} 提醒您：{content}"
@@ -131,14 +176,14 @@ def add_reminder(user_id: str, content: str, trigger_time: datetime,
         trigger = CronTrigger(day_of_week=trigger_time.weekday(),
                               hour=trigger_time.hour, minute=trigger_time.minute,
                               timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg],
+        scheduler.add_job(_send_push, trigger, args=[user_id, msg, None, setter_name, fancy],
                           id=job_id, replace_existing=True)
         weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
         time_str = trigger_time.strftime("%H:%M")
         return f"✅ 已設定每{weekdays[trigger_time.weekday()]} {time_str} 提醒您：{content}"
     else:
         trigger = DateTrigger(run_date=trigger_time, timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg, rid],
+        scheduler.add_job(_send_push, trigger, args=[user_id, msg, rid, setter_name, fancy],
                           id=job_id, replace_existing=True)
         date_str = trigger_time.strftime("%m/%d %H:%M")
         return f"✅ 已設定 {date_str} 提醒您：{content}"
