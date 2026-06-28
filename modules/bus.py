@@ -131,15 +131,43 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
             f"小提示：站牌上都有寫站名，可以照著說給我聽，例如「{route_name}，捷運忠孝復興站」"
         )
 
-    # 依方向分組
+    # 先取 StopOfRoute，建立 (RouteUID, Direction) → 終點站名稱 的對應
+    # 同時記錄每個 RouteUID 的合法站牌清單，用來過濾 ETA 結果
+    dest_names = {}   # (route_uid, d) → 終點站名
+    valid_stops = {}  # (route_uid, d) → set of stop name keywords
+    stop_keyword = stop_name.replace("站", "")
+    try:
+        stop_data = tdx_get(f"/v2/Bus/StopOfRoute/City/{city_code}/{route_name}", {"$format": "JSON"})
+        for item in stop_data:
+            uid = item.get("RouteUID", "")
+            d = item.get("Direction", 0)
+            stops = item.get("Stops", [])
+            key = (uid, d)
+            if stops:
+                dest_names[key] = stops[-1].get("StopName", {}).get("Zh_tw", "")
+            valid_stops[key] = {s.get("StopName", {}).get("Zh_tw", "") for s in stops}
+    except Exception:
+        pass
+
+    import logging as _log
+    logger = _log.getLogger(__name__)
+    logger.info(f"StopOfRoute keys: {list(dest_names.keys())}")
+
+    # 依 (RouteUID, Direction) 分組 ETA，且只保留 stop 真的在該路線上的
     results = {}
     for item in data:
         d = item.get("Direction", 0)
         if direction is not None and d != direction:
             continue
+        uid = item.get("RouteUID", "")
+        key = (uid, d)
+        # 若有 StopOfRoute 資料，確認此站確實在路線上
+        if valid_stops and key in valid_stops:
+            stop_names_in_route = valid_stops[key]
+            if not any(stop_keyword in sn for sn in stop_names_in_route):
+                continue
         seconds = item.get("EstimateTime")
         status = item.get("StopStatus")
-        key = str(d)
         if key not in results:
             results[key] = []
         results[key].append((seconds, status))
@@ -147,25 +175,13 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str, direction: int |
     if not results:
         return f"找不到「{route_name}」在「{stop_name}」站的即時資料。"
 
-    # 查詢各方向的終點站名稱，顯示「往XXX」讓媽媽看得懂
-    dest_names = {}
-    try:
-        stop_data = tdx_get(f"/v2/Bus/StopOfRoute/City/{city_code}/{route_name}", {"$format": "JSON"})
-        for item in stop_data:
-            d = str(item.get("Direction", 0))
-            stops = item.get("Stops", [])
-            if stops:
-                dest_names[d] = stops[-1].get("StopName", {}).get("Zh_tw", "")
-    except Exception:
-        pass
-
     lines = [f"🚌 {route_name} ── {stop_name}\n"]
-    for d_key, arrivals in sorted(results.items()):
-        dest = dest_names.get(d_key, "")
-        direction_label = f"往{dest}" if dest else ("方向一" if d_key == "0" else "方向二")
+    for key, arrivals in sorted(results.items(), key=lambda x: x[0][1]):
+        uid, d = key
+        dest = dest_names.get(key, "")
+        direction_label = f"往{dest}" if dest else ("方向一" if d == 0 else "方向二")
         lines.append(f"{direction_label}：")
 
-        # 排序：把有秒數的排前面
         arrivals_sorted = sorted(
             [a for a in arrivals if a[0] is not None],
             key=lambda x: x[0]
