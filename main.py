@@ -57,6 +57,8 @@ bus_query_state: dict[str, dict] = {}
 transit_query_state: dict[str, dict] = {}
 # 提醒設定暫存
 reminder_setup_state: dict[str, dict] = {}
+# QA 模式中的用戶
+qa_mode_users: set[str] = set()
 
 MAX_HISTORY_TURNS = 10
 
@@ -179,18 +181,7 @@ https://pda5284.gov.taipei/MQS/routelist.jsp""",
 ・「幫媽媽取消提醒 1」
 ・「幫媽媽取消提醒 1,2」""",
 
-    "問大小事說明": """💬 問大小事
-
-什麼都可以問我！例如：
-・「附近哪裡有郵局？」
-・「健保卡怎麼換發？」
-・「這個藥飯前還是飯後吃？」
-・「推薦台北好吃的餐廳」
-
-餐廳推薦、店家電話、生活常識、
-健康資訊、政府機關⋯⋯都可以問！
-
-（健康問題僅供參考，請以醫生為準）""",
+    "問大小事說明": "【進入問大小事模式】",  # 動態處理，見 handle_message
 }
 
 
@@ -498,8 +489,18 @@ def handle_message(user_id: str, user_text: str) -> str:
             f"{url}\n\n"
             "⚠️ 此連結只限本人使用，請勿傳給他人"
         )
+    if user_text == "問大小事說明":
+        qa_mode_users.add(user_id)
+        return "💬 問大小事開始囉！\n\n什麼都可以問，例如：\n・今天吃什麼好？\n・感冒怎麼辦？\n・附近哪裡有郵局？\n\n說「結束」離開。"
+
     if user_text in RICH_MENU_HELP:
+        qa_mode_users.discard(user_id)  # 按其他 Rich Menu 按鈕離開 QA 模式
         return RICH_MENU_HELP[user_text]
+
+    # 說「結束」離開 QA 模式
+    if user_text.strip() == "結束" and user_id in qa_mode_users:
+        qa_mode_users.discard(user_id)
+        return "好的，已離開問大小事。\n有需要再按按鈕叫我喔！"
 
     # 優先繼續未完成的查詢流程
     if user_id in bus_query_state:
@@ -508,9 +509,14 @@ def handle_message(user_id: str, user_text: str) -> str:
         intent = "transit"
     elif user_id in reminder_setup_state:
         intent = "reminder"
+    elif user_id in qa_mode_users:
+        intent = "qa"
     else:
         intent_result = detect_intent(user_text)
-        intent = intent_result.get("intent", "qa")
+        intent = intent_result.get("intent")
+        # 不符合任何意圖時，提示用戶而非直接進 AI
+        if intent == "qa":
+            return "我不太懂您的意思 😊\n\n請問是要：\n・查天氣\n・查公車\n・查路線\n・記事本\n・提醒\n・問大小事（請按按鈕）"
 
     logger.info(f"user={user_id} intent={intent} msg={user_text[:50]}")
 
