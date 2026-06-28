@@ -233,19 +233,30 @@ async function addReminder() {
   if (!targetUid) { showMsg("add", "無法識別提醒對象，請確認連結含 user_id", false); return; }
 
   const triggerTime = `${date}T${time}:00+08:00`;
+  const now = new Date();
   const weekday = repeat === "weekly" ? parseInt(document.getElementById("weekday").value) : null;
 
-  // 收集提前提醒選項
+  // 收集提前提醒選項，同時檢查是否已過期
   const earlyList = [];
+  const skipped = [];
   if (document.getElementById("e-prev").checked) {
     const t = document.getElementById("e-prev-time").value || time;
-    earlyList.push({ type: "prev_day", time: t });
+    const fireAt = new Date(`${date}T${t}:00+08:00`);
+    fireAt.setDate(fireAt.getDate() - 1);
+    if (fireAt <= now) { skipped.push("前一天提醒（時間已過）"); }
+    else { earlyList.push({ type: "prev_day", time: t }); }
   }
   if (document.getElementById("e-same").checked) {
     const t = document.getElementById("e-same-time").value || time;
-    earlyList.push({ type: "same_day", time: t });
+    const fireAt = new Date(`${date}T${t}:00+08:00`);
+    if (fireAt <= now) { skipped.push("當天提醒（時間已過）"); }
+    else { earlyList.push({ type: "same_day", time: t }); }
   }
-  if (document.getElementById("e-1h").checked) earlyList.push({ type: "minus_1h" });
+  if (document.getElementById("e-1h").checked) {
+    const fireAt = new Date(new Date(`${date}T${time}:00+08:00`) - 60*60*1000);
+    if (fireAt <= now) { skipped.push("提前1小時（時間已過）"); }
+    else { earlyList.push({ type: "minus_1h" }); }
+  }
   if (document.getElementById("e-ontime").checked) earlyList.push({ type: "on_time" });
   if (earlyList.length === 0) earlyList.push({ type: "on_time" });
 
@@ -270,7 +281,9 @@ async function addReminder() {
     const data = await res.json();
     if (!res.ok) { showMsg("add", data.error || "新增失敗", false); return; }
     const label = targetName === "self" ? "自己" : targetName;
-    showMsg("add", `✅ 已幫 ${label} 新增 ${data.count} 筆提醒`, true);
+    let msg = `✅ 已幫 ${label} 新增 ${data.count} 筆提醒`;
+    if (skipped.length) msg += `\n⚠️ 已略過：${skipped.join("、")}`;
+    showMsg("add", msg, true);
     document.getElementById("content").value = "";
   } catch(e) {
     showMsg("add", "新增失敗，請再試一次", false);
