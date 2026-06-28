@@ -297,8 +297,36 @@ def cancel_multi_reminders(user_id: str, indices: list) -> str:
     return "✅ 已取消：\n" + "\n".join(f"・{c}" for c in cancelled)
 
 
+def _normalize_cn_time(text: str) -> str:
+    """把國字時間轉成阿拉伯數字，例如「二點半」→「2:30」「三點二十」→「3:20」"""
+    CN_NUM = {"零": 0, "一": 1, "兩": 2, "二": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+              "十一": 11, "十二": 12}
+    result = text
+    # 先處理「十X點」「十點」
+    for cn, val in [("十二", 12), ("十一", 11), ("十", 10)]:
+        result = result.replace(f"{cn}點", f"{val}點")
+    # 處理「X點半」→「X:30」
+    for cn, val in CN_NUM.items():
+        result = result.replace(f"{cn}點半", f"{val}:30")
+    # 處理「X點Y十分」→「X:Y0」（例如「兩點二十分」→「2:20」）
+    for cn_h, val_h in CN_NUM.items():
+        for cn_m, val_m in CN_NUM.items():
+            result = result.replace(f"{cn_h}點{cn_m}十分", f"{val_h}:{val_m}0")
+            result = result.replace(f"{cn_h}點{cn_m}十", f"{val_h}:{val_m}0")
+    # 處理「X點Y分」
+    for cn_h, val_h in CN_NUM.items():
+        for cn_m, val_m in CN_NUM.items():
+            result = result.replace(f"{cn_h}點{cn_m}分", f"{val_h}:0{val_m}")
+    # 處理剩下的「X點」→「X點」（保留讓原本 regex 接）
+    for cn, val in CN_NUM.items():
+        result = result.replace(f"{cn}點", f"{val}點")
+    return result
+
+
 def parse_reminder(user_message: str) -> dict:
     """解析提醒指令"""
+    user_message = _normalize_cn_time(user_message)
 
     # 取消提醒（支援批次：「取消123」「取消提醒1,2,3」「取消全部提醒」）
     if any(kw in user_message for kw in ["取消全部提醒", "刪除全部提醒", "清除全部提醒"]):
