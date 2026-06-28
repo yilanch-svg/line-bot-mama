@@ -280,8 +280,25 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
     def raw_seconds(route) -> int:
         return sum(s["duration"]["value"] for s in route["legs"][0]["steps"])
 
-    # 全部用 route_score 排序（含步行懲罰 + 班距懲罰），不再強制直達優先
-    all_routes = sorted(all_routes, key=route_score)[:3]
+    def is_direct_bus(route) -> bool:
+        """只有一段乘車且全程都是公車（無轉乘、無捷運）"""
+        steps = route["legs"][0]["steps"]
+        transit_steps = [s for s in steps if s.get("travel_mode") == "TRANSIT"]
+        if len(transit_steps) != 1:
+            return False
+        vehicle = transit_steps[0]["transit_details"]["line"].get("vehicle", {}).get("name", "")
+        return vehicle in ("公車", "Bus")
+
+    sorted_routes = sorted(all_routes, key=route_score)
+    top3 = sorted_routes[:3]
+
+    # 若有直達公車不在前三名，額外插到最前面顯示
+    top3_keys = {route_key(r) for r in top3}
+    extra_direct = next(
+        (r for r in sorted_routes[3:] if is_direct_bus(r) and route_key(r) not in top3_keys),
+        None
+    )
+    all_routes = ([extra_direct] if extra_direct else []) + top3
 
     import re as _re
 

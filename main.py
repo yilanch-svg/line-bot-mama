@@ -718,18 +718,27 @@ def handle_message(user_id: str, user_text: str) -> str:
             arrival_time = parsed.get("arrival_time") or state.get("arrival_time")
             query_type = parsed.get("query_type", "route")
 
+            BUSINESS_KEYWORDS = ("診所", "醫院", "藥局", "藥房", "餐廳", "餐館", "飯店",
+                                 "旅館", "便利商店", "超市", "市場", "銀行", "郵局",
+                                 "診療", "牙醫", "眼科", "耳鼻喉", "中醫", "診所")
+
             def needs_clarify(place_name: str) -> tuple[bool, list]:
                 """
                 回傳 (需要澄清, 候選清單)。
-                條件：Geocoding 不精確（neighborhood/sublocality 層級）。
+                條件一：Geocoding 不精確（neighborhood/sublocality 層級）。
+                條件二：地點名稱含商家關鍵字（診所/醫院等），即使 Geocoding 精確也搜 Places 確認。
                 LOCATION_ALIAS 裡的已知別名直接放行。
                 """
                 if place_name in LOCATION_ALIAS:
                     return False, []
+                is_business = any(kw in place_name for kw in BUSINESS_KEYWORDS)
                 geo = check_location_precision(place_name)
-                if not geo["precise"]:
+                if not geo["precise"] or is_business:
                     places = search_places(place_name)
-                    return True, places
+                    if len(places) > 1:
+                        return True, places
+                    if not geo["precise"] and places:
+                        return True, places
                 return False, []
 
             def make_options_msg(place_name: str, places: list, label: str) -> str:
