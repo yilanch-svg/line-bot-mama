@@ -75,12 +75,16 @@ def _send_push(user_id: str, text: str, reminder_id: int = None, setter_name: st
         messages = [{"type": "text", "text": text}]
 
     try:
-        httpx.post(
+        resp = httpx.post(
             "https://api.line.me/v2/bot/message/push",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"to": user_id, "messages": messages},
             timeout=10,
         )
+        if resp.status_code != 200:
+            logger.error(f"Push message failed: {resp.status_code} {resp.text}")
+        else:
+            logger.info(f"Push message ok: user={user_id}")
     except Exception as e:
         logger.error(f"Push message failed: {e}")
 
@@ -157,36 +161,73 @@ def add_reminder(user_id: str, content: str, trigger_time: datetime,
             "content": content,
             "trigger_time": trigger_time.isoformat(),
             "repeat": repeat,
+            "fancy": fancy,
+            "setter_name": setter_name,
         }).execute().data[0]
         rid = row["id"]
     except Exception as e:
         logger.error(f"Save reminder failed: {e}")
         rid = None
 
-    job_id = f"reminder_{rid}" if rid else f"reminder_{user_id}_{trigger_time.strftime('%Y%m%d%H%M%S')}"
-
     if repeat == "daily":
-        trigger = CronTrigger(hour=trigger_time.hour, minute=trigger_time.minute,
-                              timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg, None, setter_name, fancy],
-                          id=job_id, replace_existing=True)
         time_str = trigger_time.strftime("%H:%M")
         return f"✅ 已設定每天 {time_str} 提醒您：{content}"
     elif repeat == "weekly":
-        trigger = CronTrigger(day_of_week=trigger_time.weekday(),
-                              hour=trigger_time.hour, minute=trigger_time.minute,
-                              timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg, None, setter_name, fancy],
-                          id=job_id, replace_existing=True)
         weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
         time_str = trigger_time.strftime("%H:%M")
         return f"✅ 已設定每{weekdays[trigger_time.weekday()]} {time_str} 提醒您：{content}"
     else:
-        trigger = DateTrigger(run_date=trigger_time, timezone="Asia/Taipei")
-        scheduler.add_job(_send_push, trigger, args=[user_id, msg, rid, setter_name, fancy],
-                          id=job_id, replace_existing=True)
         date_str = trigger_time.strftime("%m/%d %H:%M")
         return f"✅ 已設定 {date_str} 提醒您：{content}"
+
+
+def check_and_send_due_reminders():
+    """輪詢 Supabase，發送到期提醒（由 /check_reminders endpoint 呼叫）"""
+    from datetime import timedelta
+    now = datetime.now(TZ)
+    try:
+        sb = _get_sb()
+        rows = sb.table("reminders").select("*").execute().data
+    except Exception as e:
+        logger.error(f"check_reminders fetch failed: {e}")
+        return
+
+    for row in rows:
+        try:
+            t = datetime.fromisoformat(row["trigger_time"]).astimezone(TZ)
+            repeat = row["repeat"]
+            rid = row["id"]
+            user_id = row["user_id"]
+            content = row["content"]
+            fancy = row.get("fancy") or False
+            setter_name = row.get("setter_name")
+            msg = f"⏰ 提醒您：{content}"
+
+            last_sent_raw = row.get("last_sent_at")
+            last_sent = datetime.fromisoformat(last_sent_raw).astimezone(TZ) if last_sent_raw else None
+            not_recently = last_sent is None or (now - last_sent) > timedelta(minutes=30)
+
+            if repeat is None:
+                should_send = t <= now
+            elif repeat == "daily":
+                should_send = now.hour == t.hour and now.minute == t.minute and not_recently
+            elif repeat == "weekly":
+                should_send = (now.weekday() == t.weekday() and
+                               now.hour == t.hour and now.minute == t.minute and not_recently)
+            else:
+                should_send = False
+
+            if should_send:
+                _send_push(user_id, msg, setter_name=setter_name, fancy=fancy)
+                if repeat is None:
+                    sb.table("reminders").delete().eq("id", rid).execute()
+                else:
+                    sb.table("reminders").update(
+                        {"last_sent_at": now.isoformat()}
+                    ).eq("id", rid).execute()
+                logger.info(f"check_reminders: sent rid={rid} user={user_id}")
+        except Exception as e:
+            logger.error(f"check_reminders row {row.get('id')} failed: {e}")
 
 
 def list_reminders(user_id: str) -> str:

@@ -729,6 +729,16 @@ def health():
     return {"status": "ok", "version": "1.1.0"}
 
 
+@app.route("/check_reminders", methods=["GET"])
+def check_reminders():
+    secret = os.getenv("CRON_SECRET", "")
+    if secret and request.args.get("secret") != secret:
+        abort(403)
+    from modules.reminder import check_and_send_due_reminders
+    check_and_send_due_reminders()
+    return "ok"
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
