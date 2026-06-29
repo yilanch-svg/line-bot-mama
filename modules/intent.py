@@ -47,6 +47,11 @@ def detect_city(text: str) -> str | None:
 def detect_intent(user_message: str) -> dict:
     """用關鍵字判斷使用者訊息的意圖，回傳 dict"""
 
+    # 記事本最優先（「記一下」「備忘」等明確關鍵字，避免長文被天氣/交通搶走）
+    for kw in NOTE_KEYWORDS:
+        if kw in user_message:
+            return {"intent": "note"}
+
     # 天氣：有天氣關鍵字，或有城市名稱加上天氣相關詞
     for kw in WEATHER_KEYWORDS:
         if kw in user_message:
@@ -57,11 +62,6 @@ def detect_intent(user_message: str) -> dict:
     city = detect_city(user_message)
     if city and len(user_message) <= 6:
         return {"intent": "weather", "city": city}
-
-    # 記事本關鍵字優先（避免長文內含「從...到...」被誤判為交通）
-    for kw in NOTE_KEYWORDS:
-        if kw in user_message:
-            return {"intent": "note"}
 
     # 有明確出發地「從A到B」或「A到B怎麼去」→ 優先走 transit
     import re as _re
