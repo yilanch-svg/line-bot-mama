@@ -316,6 +316,8 @@ def parse_bus_query(user_message: str) -> dict:
         r"|[搭坐]\s*(\d+)"                   # 搭226
         r"|^(\d+)\s*[到至,，、]"             # 226到/226、（句首）
         r"|^(\d+)\s*[號路]"                  # 22號（句首）
+        r"|^(\d+)\s+[一-鿿]"         # 22 松平路口（句首數字+空格+中文）
+        r"|[查問]\s*(\d+)"                   # 查22、問22
         r"|([^\s]{1,6}幹線|[^\s]{1,6}快速)", # 承德幹線
         user_message
     )
@@ -329,7 +331,7 @@ def parse_bus_query(user_message: str) -> dict:
             break
 
     # 把路線相關文字先移除，避免干擾站名解析
-    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*", "", user_message)
+    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*|^[查問]", "", user_message)
 
     # 抓站名：支援「XXX站」「到XXX站」「到XXX（還有/多久）」等各種格式
     stop_match = re.search(
@@ -342,6 +344,20 @@ def parse_bus_query(user_message: str) -> dict:
         stop = re.sub(r"^[,，、\s]+|[,，、\s]+$", "", stop)  # 去掉頭尾標點
         if stop and not re.search(r"[多幾分鐘還有久]", stop):
             result["stop"] = stop if stop.endswith("站") else stop + "站"
+
+    # 口語輸入fallback：沒抓到站名時，把路線/城市/標點移除後的剩餘文字當站名
+    if not result["stop"]:
+        fallback = re.sub(
+            r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+"
+            r"|[搭坐到在停至查問,，、\s]+|還有|多久|幾分|公車",
+            "", cleaned
+        ).strip()
+        # 移除城市名
+        for city in CITY_CODE:
+            fallback = fallback.replace(city, "")
+        fallback = fallback.strip()
+        if 2 <= len(fallback) <= 10 and not re.search(r"[多幾分鐘還有久]", fallback):
+            result["stop"] = fallback if fallback.endswith("站") else fallback + "站"
 
     result["complete"] = bool(result["route"] and result["stop"])
     return result
