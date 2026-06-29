@@ -370,7 +370,16 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
 
     def format_route(leg, route_num: int, total_routes: int, orig_dest: str, show_bike: bool = False) -> list:
         steps = leg["steps"]
-        step_seconds = sum(s["duration"]["value"] for s in steps)
+        step_seconds = 0
+        for s in steps:
+            secs = s["duration"]["value"]
+            if s.get("travel_mode") == "TRANSIT":
+                td = s.get("transit_details", {})
+                vehicle = td.get("line", {}).get("vehicle", {}).get("name", "")
+                n = td.get("num_stops", 0)
+                if vehicle in ("公車", "Bus") and n >= 2:
+                    secs = max(secs, (n - 1) * 102)
+            step_seconds += secs
         step_minutes = (step_seconds + 59) // 60
         total_distance = leg["distance"]["text"]
 
