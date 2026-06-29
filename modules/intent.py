@@ -58,6 +58,11 @@ def detect_intent(user_message: str) -> dict:
     if city and len(user_message) <= 6:
         return {"intent": "weather", "city": city}
 
+    # 記事本關鍵字優先（避免長文內含「從...到...」被誤判為交通）
+    for kw in NOTE_KEYWORDS:
+        if kw in user_message:
+            return {"intent": "note"}
+
     # 有明確出發地「從A到B」或「A到B怎麼去」→ 優先走 transit
     import re as _re
     if _re.search(r"從.+到.+|.+到.+怎麼去|.+怎麼去", user_message):
@@ -77,11 +82,6 @@ def detect_intent(user_message: str) -> dict:
     for kw in TRANSIT_KEYWORDS:
         if kw in user_message:
             return {"intent": "transit"}
-
-    # 記事本
-    for kw in NOTE_KEYWORDS:
-        if kw in user_message:
-            return {"intent": "note"}
 
     # 提醒
     for kw in REMINDER_KEYWORDS:
