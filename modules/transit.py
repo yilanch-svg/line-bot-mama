@@ -137,14 +137,22 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
         return []
 
     import time as _time
-    now_ts = int(_time.time())
+    from datetime import datetime, date as _date
+
+    # 固定用「今天早上9點」當 departure_time，避免查詢時間影響班次推薦
+    # arrival_time 查詢例外（已有 arrival_ts）
+    if not arrival_ts:
+        ref_dt = datetime.combine(_date.today(), datetime.min.time().replace(hour=9, minute=0))
+        ref_ts = int(ref_dt.timestamp())
+        base_params = {"departure_time": ref_ts}
+    else:
+        base_params = {}
 
     # 查四次：最快、少走路、偏好公車、偏好捷運，合併去重
-    # 不帶 departure_time，回傳一般性最佳路線，結果更穩定
-    routes_fast = query_routes({})
-    routes_less_walk = query_routes({"transit_routing_preference": "less_walking"})
-    routes_bus = query_routes({"transit_mode": "bus", "transit_routing_preference": "less_walking"})
-    routes_rail = query_routes({"transit_mode": "subway|tram|rail", "transit_routing_preference": "less_walking"})
+    routes_fast = query_routes({**base_params})
+    routes_less_walk = query_routes({"transit_routing_preference": "less_walking", **base_params})
+    routes_bus = query_routes({"transit_mode": "bus", "transit_routing_preference": "less_walking", **base_params})
+    routes_rail = query_routes({"transit_mode": "subway|tram|rail", "transit_routing_preference": "less_walking", **base_params})
 
     if not any([routes_fast, routes_less_walk, routes_bus, routes_rail]):
         return f"找不到從「{origin}」到「{destination}」的大眾運輸路線。\n\n請確認地點名稱，或試試說更詳細的地址。"
@@ -292,12 +300,15 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
     sorted_routes = sorted(all_routes, key=route_score)
     top3 = sorted_routes[:3]
 
-    # 若有直達公車不在前三名，額外插到最前面顯示
+    # 若 top3 裡沒有直達公車，才從第4名以後找一條補到最前面
     top3_keys = {route_key(r) for r in top3}
-    extra_direct = next(
-        (r for r in sorted_routes[3:] if is_direct_bus(r) and route_key(r) not in top3_keys),
-        None
-    )
+    top3_has_direct = any(is_direct_bus(r) for r in top3)
+    extra_direct = None
+    if not top3_has_direct:
+        extra_direct = next(
+            (r for r in sorted_routes[3:] if is_direct_bus(r) and route_key(r) not in top3_keys),
+            None
+        )
     all_routes = ([extra_direct] if extra_direct else []) + top3
 
     import re as _re
