@@ -67,6 +67,10 @@ def detect_intent(user_message: str) -> dict:
     import re as _re
     if _re.search(r"從.+到.+|.+到.+怎麼去|.+怎麼去", user_message):
         return {"intent": "transit"}
+    # 「家裡到大同高中」這種「中文地點到中文地點」格式（排除公車的「幾分鐘到站」）
+    if _re.search(r"[一-鿿]{1,8}到[一-鿿]{2,}", user_message) \
+            and not any(kw in user_message for kw in BUS_KEYWORDS):
+        return {"intent": "transit"}
 
     # 公車
     for kw in BUS_KEYWORDS:
