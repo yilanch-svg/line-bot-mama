@@ -286,7 +286,17 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
         return sum(1 for s in route["legs"][0]["steps"] if s.get("travel_mode") == "TRANSIT")
 
     def raw_seconds(route) -> int:
-        return sum(s["duration"]["value"] for s in route["legs"][0]["steps"])
+        total = 0
+        for s in route["legs"][0]["steps"]:
+            secs = s["duration"]["value"]
+            if s.get("travel_mode") == "TRANSIT":
+                td = s.get("transit_details", {})
+                vehicle = td.get("line", {}).get("vehicle", {}).get("name", "")
+                n = td.get("num_stops", 0)
+                if vehicle in ("公車", "Bus") and n >= 2:
+                    secs = max(secs, (n - 1) * 102)
+            total += secs
+        return total
 
     def is_direct_bus(route) -> bool:
         """只有一段乘車且全程都是公車（無轉乘、無捷運）"""
@@ -397,6 +407,14 @@ def get_directions(origin: str, destination: str, orig_destination: str = None,
                 arr_stop = arr_stop_raw.get("name", "")
                 num_stops = transit.get("num_stops", 0)
                 headsign = transit.get("headsign", "")
+
+                # 公車行駛時間修正：Google 常低估，按每段站距 1.7 分鐘計算下限
+                if vehicle in ("公車", "Bus") and num_stops >= 2:
+                    min_bus_secs = (num_stops - 1) * 102  # 1.7 分鐘 × 60 = 102 秒
+                    actual_secs = step["duration"]["value"]
+                    if actual_secs < min_bus_secs:
+                        corrected_mins = round(min_bus_secs / 60)
+                        duration = f"{corrected_mins} 分鐘"
 
                 # 公車站名以 TDX 為準（Google Maps 站名有時不準）
                 if vehicle in ("公車", "Bus") and line_name:
