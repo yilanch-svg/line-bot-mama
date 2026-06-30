@@ -356,6 +356,8 @@ def parse_bus_query(user_message: str) -> dict:
         r"|^(\d+)\s+[一-鿿]"                  # 22 松平路口（句首數字+空格+中文）
         r"|[查問]\s*(\d+)"                    # 查22、問22
         r"|^([藍紅橘綠棕]\d+)"               # 藍5、紅2（顏色路線，句首）
+        r"|^(市民小巴\d+)"                    # 市民小巴1（優先於小字號）
+        r"|^(小\d+[^\d\s]*)"                   # 小1、小1區、小5區（山區小字號，句首）
         r"|([^\s]{1,6}幹線|[^\s]{1,6}快速)",  # 承德幹線
         user_message
     )
@@ -369,7 +371,7 @@ def parse_bus_query(user_message: str) -> dict:
             break
 
     # 把路線相關文字先移除，避免干擾站名解析
-    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*|^[查問]|^[藍紅橘綠棕]\d+\s*", "", user_message)
+    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*|^[查問]|^市民小巴\d+\s*|^[藍紅橘綠棕]\d+\s*|^小\d+[^\d\s]*\s*", "", user_message)
 
     # 抓站名：支援「XXX站」「到XXX站」「到XXX（還有/多久）」等各種格式
     stop_match = re.search(

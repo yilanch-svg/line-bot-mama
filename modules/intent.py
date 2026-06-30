@@ -79,7 +79,7 @@ def detect_intent(user_message: str) -> dict:
 
     # 「22號象山站」「226到捷運行天宮站」「藍5 吳興街」這種句首路線寫法
     import re
-    if re.search(r"^\d+[號路,，、到至]|^\d+\s+|^[藍紅橘綠棕]\d+", user_message):
+    if re.search(r"^\d+[號路,，、到至]|^\d+\s+|^[藍紅橘綠棕]\d+|^小\d+[^\d\s]*|^市民小巴\d+", user_message):
         return {"intent": "bus"}
 
     # 交通路線
