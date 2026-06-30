@@ -188,7 +188,7 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str,
             continue
         uid = item.get("RouteUID", "")
         key_uid = (uid, d)
-        if valid_stops and key_uid in valid_stops:
+        if not exact and valid_stops and key_uid in valid_stops:
             if not any(stop_keyword in sn for sn in valid_stops[key_uid]):
                 continue
         seconds = item.get("EstimateTime")

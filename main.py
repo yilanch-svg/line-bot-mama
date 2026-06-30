@@ -193,6 +193,11 @@ def handle_bus(user_id: str, user_text: str) -> str:
         )
 
     # 資料齊全：先確認子站
+    # 站名已含括號（如「捷運行天宮站(松江路)」）表示使用者已指定子站，直接查
+    if "(" in stop:
+        bus_query_state.pop(user_id, None)
+        return get_bus_arrival(route, stop, city, exact=True)
+
     options = get_stop_options(route, stop, city)
     if len(options) > 1:
         bus_query_state[user_id] = {"route": route, "stop": stop, "city": city, "stop_options": options}
