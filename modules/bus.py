@@ -290,6 +290,30 @@ def tdx_nearest_stop_name(route_name: str, lat: float, lng: float,
     return best_name or None
 
 
+def get_route_variants(route_number: str, city: str) -> list[str]:
+    """
+    查詢同一數字的所有路線變體（如 212、212直、212夜）。
+    回傳路線名稱清單；只有1個表示不需要澄清。
+    """
+    import re
+    city_code = CITY_CODE.get(city)
+    if not city_code:
+        return [route_number]
+    try:
+        data = tdx_get(
+            f"/v2/Bus/Route/City/{city_code}",
+            {"$filter": f"contains(RouteName/Zh_tw,'{route_number}')", "$format": "JSON",
+             "$select": "RouteName"},
+        )
+    except Exception:
+        return [route_number]
+    names = sorted({
+        item["RouteName"]["Zh_tw"] for item in data
+        if re.fullmatch(rf"{re.escape(route_number)}[^\d]*", item.get("RouteName", {}).get("Zh_tw", ""))
+    })
+    return names if names else [route_number]
+
+
 def get_stop_options(route_name: str, stop_name: str, city: str) -> list[str]:
     """
     查詢該路線在指定站名有哪些子站（以站名開頭比對）。

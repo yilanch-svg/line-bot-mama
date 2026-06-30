@@ -26,7 +26,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from modules.intent import detect_intent
 from modules.weather import get_weather_forecast
 from modules.qa import get_qa_response
-from modules.bus import get_bus_arrival, parse_bus_query, get_stop_options
+from modules.bus import get_bus_arrival, parse_bus_query, get_stop_options, get_route_variants
 from modules.transit import get_directions, parse_transit_query, check_location_precision, search_places, LOCATION_ALIAS
 from modules.notes import add_note, search_notes, delete_note, delete_last_note, parse_note_query
 from modules.reminder import add_reminder, list_reminders, cancel_reminder, cancel_multi_reminders, cancel_all_reminders, parse_reminder, scheduler, load_reminders_from_db
@@ -139,6 +139,31 @@ def handle_bus(user_id: str, user_text: str) -> str:
 
     state = bus_query_state.get(user_id, {})
 
+    # ── 使用者正在選路線變體（212直/212夜 等）────────────────────
+    if state.get("route_options"):
+        options = state["route_options"]
+        choice = user_text.strip()
+        cancel_num = len(options) + 1
+        if choice == str(cancel_num) or "皆非" in choice or "取消" in choice:
+            bus_query_state.pop(user_id, None)
+            return "好的，已取消查詢。"
+        try:
+            idx = int(choice) - 1
+            if not (0 <= idx < len(options)):
+                raise ValueError
+            confirmed_route = options[idx]
+            stop = state.get("stop")
+            city = state.get("city", "台北")
+            bus_query_state[user_id] = {"route": confirmed_route, "stop": stop, "city": city}
+            # 繼續走後面的站牌流程（不直接 return）
+            state = bus_query_state[user_id]
+        except (ValueError, TypeError):
+            lines = [f"請輸入數字選擇路線："]
+            for i, name in enumerate(options, 1):
+                lines.append(f"{i}. {name}")
+            lines.append(f"{cancel_num}. 以上皆非（取消）")
+            return "\n".join(lines)
+
     # ── 使用者正在選子站 ──────────────────────────────────────
     if state.get("stop_options"):
         options = state["stop_options"]
@@ -192,6 +217,16 @@ def handle_bus(user_id: str, user_text: str) -> str:
             f"・「行天宮站」"
         )
 
+    # 查路線變體（如 212、212直、212夜）
+    variants = get_route_variants(route, city)
+    if len(variants) > 1:
+        bus_query_state[user_id] = {"route": route, "stop": stop, "city": city, "route_options": variants}
+        lines = [f"「{route}」有幾條路線，請問您要搭哪一條？\n"]
+        for i, name in enumerate(variants, 1):
+            lines.append(f"{i}. {name}")
+        lines.append(f"{len(variants)+1}. 以上皆非（取消）")
+        return "\n".join(lines)
+
     # 資料齊全：先確認子站
     # 站名已含括號（如「捷運行天宮站(松江路)」）表示使用者已指定子站，直接查
     if "(" in stop:
@@ -209,7 +244,7 @@ def handle_bus(user_id: str, user_text: str) -> str:
 
     bus_query_state.pop(user_id, None)
     exact_stop = options[0] if options else stop
-    return get_bus_arrival(route, exact_stop, city)
+    return get_bus_arrival(route, exact_stop, city, exact=("(" in exact_stop))
 
 
 RICH_MENU_HELP = {
