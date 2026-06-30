@@ -130,10 +130,16 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str,
         return "公車資料暫時無法取得，請稍後再試。"
 
     # 只保留站名以關鍵字開頭的資料（排除如「信義松仁路口(松仁)」這類不同站）
+    # 若 startswith 無結果（如「行天宮」找「捷運行天宮站」），退回 contains 比對
     # exact 模式已用 eq 精確比對，不需要再過濾
     if not exact:
-        data = [item for item in data
-                if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
+        startswith_data = [item for item in data
+                           if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
+        if startswith_data:
+            data = startswith_data
+        else:
+            data = [item for item in data
+                    if stop_keyword in item.get("StopName", {}).get("Zh_tw", "")]
 
     if not data:
         return (
@@ -292,11 +298,10 @@ def get_stop_options(route_name: str, stop_name: str, city: str) -> list[str]:
         )
     except Exception:
         return []
-    names = sorted({
-        item["StopName"]["Zh_tw"]
-        for item in data
-        if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)
-    })
+    def sn(item):
+        return item.get("StopName", {}).get("Zh_tw", "")
+    startswith_names = sorted({sn(i) for i in data if sn(i).startswith(stop_keyword)})
+    names = startswith_names if startswith_names else sorted({sn(i) for i in data if stop_keyword in sn(i)})
     return names
 
 
