@@ -155,8 +155,25 @@ def handle_bus(user_id: str, user_text: str) -> str:
             stop = state.get("stop")
             city = state.get("city", "台北")
             bus_query_state[user_id] = {"route": confirmed_route, "stop": stop, "city": city}
-            # 繼續走後面的站牌流程（不直接 return）
-            state = bus_query_state[user_id]
+            # 直接進站牌流程並 return，避免再次觸發 get_route_variants
+            if not stop:
+                route_label = f"{confirmed_route}號公車" if confirmed_route.isdigit() else confirmed_route
+                return (f"請問您要查 {route_label} 在哪個站的到站時間呢？🚏\n\n"
+                        f"站名照著站牌上寫的說就可以，例如：\n・「台北車站」\n・「捷運忠孝復興站」")
+            if "(" in stop:
+                bus_query_state.pop(user_id, None)
+                return get_bus_arrival(confirmed_route, stop, city, exact=True)
+            stop_opts = get_stop_options(confirmed_route, stop, city)
+            if len(stop_opts) > 1:
+                bus_query_state[user_id] = {"route": confirmed_route, "stop": stop, "city": city, "stop_options": stop_opts}
+                lines = [f"「{stop}」這條路線有幾個站牌，請問您在哪一個？\n"]
+                for i, name in enumerate(stop_opts, 1):
+                    lines.append(f"{i}. {name}")
+                lines.append(f"{len(stop_opts)+1}. 取消")
+                return "\n".join(lines)
+            bus_query_state.pop(user_id, None)
+            exact_stop = stop_opts[0] if stop_opts else stop
+            return get_bus_arrival(confirmed_route, exact_stop, city, exact=("(" in exact_stop))
         except (ValueError, TypeError):
             lines = [f"請輸入數字選擇路線："]
             for i, name in enumerate(options, 1):
