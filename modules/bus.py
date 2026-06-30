@@ -111,10 +111,13 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str,
     try:
         path = f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}"
         if exact:
-            # 精確站名（從 TDX 取得），直接用 eq 比對，避免 replace 誤刪字
+            # 精確站名含括號時 OData eq 會解析失敗，改用去括號的 contains 查 API
+            # 再於 Python 端做精確比對
+            import re as _re
             stop_keyword = stop_name
+            base = _re.sub(r'\([^)]*\)', '', stop_name).strip()
             params = {
-                "$filter": f"StopName/Zh_tw eq '{stop_name}'",
+                "$filter": f"contains(StopName/Zh_tw,'{base}')",
                 "$format": "JSON",
             }
         else:
@@ -129,17 +132,18 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str,
         logging.getLogger(__name__).error(f"TDX API error: {e}")
         return "公車資料暫時無法取得，請稍後再試。"
 
-    # 只保留站名以關鍵字開頭的資料（排除如「信義松仁路口(松仁)」這類不同站）
-    # 若 startswith 無結果（如「行天宮」找「捷運行天宮站」），退回 contains 比對
-    # exact 模式已用 eq 精確比對，不需要再過濾
-    if not exact:
+    # client 端過濾站名
+    if exact:
+        # 精確比對（從子站選單選出的站名）
+        data = [item for item in data
+                if item.get("StopName", {}).get("Zh_tw", "") == stop_keyword]
+    else:
+        # startswith 優先，無結果退回 contains（如「行天宮」→「捷運行天宮站」）
         startswith_data = [item for item in data
                            if item.get("StopName", {}).get("Zh_tw", "").startswith(stop_keyword)]
-        if startswith_data:
-            data = startswith_data
-        else:
-            data = [item for item in data
-                    if stop_keyword in item.get("StopName", {}).get("Zh_tw", "")]
+        data = startswith_data if startswith_data else [
+            item for item in data
+            if stop_keyword in item.get("StopName", {}).get("Zh_tw", "")]
 
     if not data:
         return (
