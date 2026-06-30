@@ -234,8 +234,9 @@ def handle_bus(user_id: str, user_text: str) -> str:
             f"・「行天宮站」"
         )
 
-    # 查路線變體（如 212、212直、212夜）
-    variants = get_route_variants(route, city)
+    # 查路線變體（如 212、212直、212夜），同時自動偵測實際城市（台北/新北）
+    variants, city = get_route_variants(route, city)
+    bus_query_state[user_id]["city"] = city  # 更新為實際城市
     if len(variants) > 1:
         bus_query_state[user_id] = {"route": route, "stop": stop, "city": city, "route_options": variants}
         lines = [f"「{route}」有幾條路線，請問您要搭哪一條？\n"]
