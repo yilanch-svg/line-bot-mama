@@ -221,9 +221,13 @@ def get_bus_arrival(route_name: str, stop_name: str, city: str,
         # 末班/未營運的放最後
         no_eta = [(sec, status) for sec, status in raw if sec is None]
         arrivals = deduped + no_eta
+        dest = dest_names.get(key_uid, "")
+        if not dest:
+            # fallback：同方向其他 RouteUID 的終點站名
+            dest = next((n for (u, dd), n in dest_names.items() if dd == d and n), "")
         best_per_dir[d] = {
             "arrivals": arrivals,
-            "dest": dest_names.get(key_uid, ""),
+            "dest": dest,
             "has_eta": bool(deduped),
         }
 
