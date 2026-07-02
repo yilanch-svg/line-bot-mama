@@ -333,17 +333,27 @@ def get_stop_options(route_name: str, stop_name: str, city: str) -> list[str]:
     if not city_code:
         return []
     stop_keyword = stop_name.replace("站", "")
-    try:
-        data = tdx_get(
-            f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}",
-            {"$filter": f"contains(StopName/Zh_tw,'{stop_keyword}')", "$format": "JSON"},
-        )
-    except Exception:
-        return []
+    # 若關鍵字含「捷運」，同時也用去掉「捷運」的短版搜尋（如「捷運市政府」→「市政府」）
+    short_keyword = stop_keyword[2:] if stop_keyword.startswith("捷運") else None
+
+    def fetch(keyword):
+        try:
+            return tdx_get(
+                f"/v2/Bus/EstimatedTimeOfArrival/City/{city_code}/{route_name}",
+                {"$filter": f"contains(StopName/Zh_tw,'{keyword}')", "$format": "JSON"},
+            )
+        except Exception:
+            return []
+
     def sn(item):
         return item.get("StopName", {}).get("Zh_tw", "")
-    startswith_names = sorted({sn(i) for i in data if sn(i).startswith(stop_keyword)})
-    names = startswith_names if startswith_names else sorted({sn(i) for i in data if stop_keyword in sn(i)})
+
+    data = fetch(stop_keyword)
+    if short_keyword:
+        data = data + fetch(short_keyword)
+
+    startswith_names = sorted({sn(i) for i in data if sn(i).startswith(stop_keyword) or (short_keyword and sn(i).startswith(short_keyword))})
+    names = startswith_names if startswith_names else sorted({sn(i) for i in data if stop_keyword in sn(i) or (short_keyword and short_keyword in sn(i))})
     return names
 
 
@@ -381,7 +391,7 @@ def parse_bus_query(user_message: str) -> dict:
             break
 
     # 把路線相關文字先移除，避免干擾站名解析
-    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*|^[查問]|^市民小巴\d+\s*|^[藍紅橘綠棕]\d+\s*|^小\d+[^\d\s]*\s*", "", user_message)
+    cleaned = re.sub(r"\d+\s*[號路]?\s*公車|公車\s*[第]?\s*\d+\s*[號路]?|\d+\s*[號路]|\d+\s*[到至]\s*|^[查問]|^市民小巴\d+\s*|^[藍紅橘綠棕]\d+\s*|^小\d+[^\d\s]*\s*|[^\s]{1,6}幹線\s*|[^\s]{1,6}快速\s*", "", user_message)
 
     # 抓站名：支援「XXX站」「到XXX站」「到XXX（還有/多久）」等各種格式
     stop_match = re.search(
